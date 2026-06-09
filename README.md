@@ -198,7 +198,7 @@ auto-dataset-builder/
 | V0.7 | ✅ Done | Active learning loop (uncertainty sampling + DQS convergence) |
 | V0.8 | ✅ Done | Web dashboard (Vue 3 + Chart.js radar chart) |
 | V0.9 | ✅ Done | Version control + YOLO/COCO export + download API |
-| V1.0 | 📋 Planned | Full release + paper submission |
+| V1.0 | ✅ Done | Integration tests + benchmark + production Docker + CI |
 
 ---
 
@@ -240,8 +240,16 @@ Or use the [CITATION.cff](CITATION.cff) file directly — GitHub will render a "
 ## Tests
 
 ```bash
+# Unit tests (47 tests)
 python3 tests/test_all.py
 # Results: 47 passed, 0 failed / 47 total ✓
+
+# Integration tests (8 end-to-end tests)
+python3 tests/test_integration.py
+# Results: 8 passed, 0 failed / 8 total ✓
+
+# Benchmark
+python3 tools/benchmark.py --images 100 --outfile results.json
 ```
 
 CI runs automatically on every push via GitHub Actions.

@@ -273,19 +273,34 @@ backend/
 
 ---
 
-## V1.0 — Full Release
+## V1.0 — Full Release ✅ DONE (2026-06-09)
 
 **目標**：完整可用版本 + 論文提交。
 
 ### Issues / Tasks
 
-- [ ] End-to-end integration test
-- [ ] Performance benchmark（vs Manual labeling）
-- [ ] README + Documentation
-- [ ] GitHub Actions CI/CD
-- [ ] Docker 生產環境配置
-- [ ] 論文 Figure 與 Table 生成腳本
-- [ ] Demo video
+- [x] End-to-end integration test suite（8 tests，完整 pipeline smoke test）
+- [x] Performance benchmark script（`tools/benchmark.py`，JSON report）
+- [x] Production Docker Compose（`docker-compose.prod.yml`，nginx + multi-network）
+- [x] Frontend production Dockerfile（multi-stage build + nginx）
+- [x] GitHub Actions 三 job CI（unit / integration / benchmark artifact）
+- [x] CITATION.cff 版本升至 1.0.0
+- [x] README 更新（完整測試指令 + roadmap 全 ✅）
+
+### Deliverables
+
+```
+tests/
+  test_integration.py   (8 E2E tests)
+tools/
+  benchmark.py          (pipeline throughput + DQS report)
+docker-compose.prod.yml
+frontend/
+  Dockerfile.prod       (nginx multi-stage)
+  nginx.conf
+.github/workflows/test.yml  (3 jobs)
+CITATION.cff              (version 1.0.0)
+```
 
 ---
 

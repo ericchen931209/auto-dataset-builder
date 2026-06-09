@@ -7,7 +7,8 @@ on:
     branches: [ main ]
 
 jobs:
-  test:
+  unit-tests:
+    name: Unit Tests (47 tests)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -23,5 +24,52 @@ jobs:
                       scikit-image psycopg2-binary pydantic pydantic-settings \
                       fastapi sqlalchemy httpx Pillow
 
-      - name: Run tests
-        run: python tests/test_all.py
+      - name: Run unit tests
+        run: python3 tests/test_all.py
+
+  integration-tests:
+    name: Integration Tests (8 tests)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          pip install numpy scikit-learn imagehash opencv-python-headless \
+                      scikit-image psycopg2-binary pydantic pydantic-settings \
+                      fastapi sqlalchemy httpx Pillow
+
+      - name: Run integration tests
+        run: python3 tests/test_integration.py
+
+  benchmark:
+    name: Benchmark (smoke)
+    runs-on: ubuntu-latest
+    needs: [unit-tests, integration-tests]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          pip install numpy scikit-learn imagehash opencv-python-headless \
+                      scikit-image psycopg2-binary pydantic pydantic-settings \
+                      fastapi sqlalchemy httpx Pillow
+
+      - name: Run benchmark (20 images)
+        run: python3 tools/benchmark.py --images 20 --outfile benchmark_results.json
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results
+          path: benchmark_results.json

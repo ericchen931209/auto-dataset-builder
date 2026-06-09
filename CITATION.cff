@@ -14,7 +14,7 @@ authors:
     email: chenchen931209@gmail.com
 repository-code: "https://github.com/ericchen931209/auto-dataset-builder"
 license: MIT
-version: "0.8.0"
+version: "1.0.0"
 date-released: "2026-06-09"
 keywords:
   - dataset
