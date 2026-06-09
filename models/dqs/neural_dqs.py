@@ -59,7 +59,7 @@ def train(
     model = build_model()
     model.fit(X, y)
 
-    # Training metrics
+    # Training metrics (in-sample)
     y_pred = model.predict(X)
     residuals = y - y_pred
     metrics = {
@@ -69,9 +69,20 @@ def train(
         "train_r2": float(1 - np.var(residuals) / np.var(y)),
     }
 
-    # Compute Pearson r
+    # Pearson r (in-sample)
     corr = np.corrcoef(y, y_pred)
     metrics["pearson_r"] = float(corr[0, 1])
+
+    # Cross-validated Pearson r (leave-one-out for small datasets)
+    if len(X) >= 10:
+        from sklearn.model_selection import cross_val_predict, KFold
+        cv = KFold(n_splits=min(5, len(X)), shuffle=True, random_state=42)
+        y_cv = cross_val_predict(build_model(), X, y, cv=cv)
+        cv_corr = np.corrcoef(y, y_cv)
+        metrics["cv_pearson_r"] = float(cv_corr[0, 1])
+        cv_res = y - y_cv
+        metrics["cv_mse"] = float(np.mean(cv_res ** 2))
+        metrics["cv_r2"]  = float(1 - np.var(cv_res) / np.var(y))
 
     Path(save_path).parent.mkdir(parents=True, exist_ok=True)
     joblib.dump(model, save_path)

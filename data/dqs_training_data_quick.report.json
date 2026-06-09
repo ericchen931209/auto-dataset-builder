@@ -1,0 +1,21 @@
+{
+  "n_samples": 29,
+  "mAP50_range": [
+    0.2088,
+    0.4636
+  ],
+  "train_metrics": {
+    "n_samples": 29,
+    "train_mse": 0.026187025010585785,
+    "train_mae": 0.13931305706501007,
+    "train_r2": -9.148024559020996,
+    "pearson_r": 0.15449761940285578
+  },
+  "feature_correlations": {
+    "annotation_quality": 0.0935,
+    "diversity": 0.6321,
+    "lighting_diversity": -0.088,
+    "pose_diversity": -0.2055,
+    "class_balance": 0.0488
+  }
+}
