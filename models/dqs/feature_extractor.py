@@ -1,7 +1,9 @@
 """
 Neural DQS — Feature Extraction
 
-Computes f(D) = [AQ, DS, LD, PD, CB] ∈ ℝ⁵ for a dataset directory.
+Computes f(D) = [AQ, SH, LD, PD, CB] ∈ ℝ⁵ for a dataset directory.
+SH (Sharpness) replaces DS (Diversity) — Laplacian variance is a reliable
+image-quality indicator that correctly degrades with blur/noise.
 See docs/dqs-model.md for full mathematical formulation.
 """
 
@@ -19,8 +21,9 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class DQSFeatures:
-    annotation_quality: float   # AQ ∈ [0,1]
-    diversity: float            # DS ∈ [0,1]
+    annotation_quality: float   # AQ ∈ [0,1]  annotation completeness + geometry
+    sharpness: float            # IQ ∈ [0,1]  image quality (blur × noise-clean)
+    clip_diversity: float       # CD ∈ [0,1]  CLIP-based semantic diversity
     lighting_diversity: float   # LD ∈ [0,1]
     pose_diversity: float       # PD ∈ [0,1]
     class_balance: float        # CB ∈ [0,1]
@@ -28,7 +31,8 @@ class DQSFeatures:
     def to_vector(self) -> list[float]:
         return [
             self.annotation_quality,
-            self.diversity,
+            self.sharpness,
+            self.clip_diversity,
             self.lighting_diversity,
             self.pose_diversity,
             self.class_balance,
@@ -37,7 +41,8 @@ class DQSFeatures:
     def to_dict(self) -> dict:
         return {
             "annotation_quality": self.annotation_quality,
-            "diversity": self.diversity,
+            "sharpness": self.sharpness,
+            "clip_diversity": self.clip_diversity,
             "lighting_diversity": self.lighting_diversity,
             "pose_diversity": self.pose_diversity,
             "class_balance": self.class_balance,
@@ -48,33 +53,41 @@ class DQSFeatures:
 
 def compute_annotation_quality(labels_dir: str) -> float:
     """
-    AQ proxy: mean of (bbox_area / image_area) clamped to reasonable range.
-    Real IoU-based AQ (YOLO vs SAM2) is computed in V0.5 when SAM2 is available.
+    AQ: composite of annotation completeness and geometric consistency.
 
-    Here we use a heuristic: annotations with very large or very small bbox
-    relative to image are likely errors. Score = fraction of "reasonable" boxes.
+    completeness = fraction of label files that have ≥1 valid annotation
+    geometry     = fraction of bboxes with reasonable area (0.5%–70%)
+
+    AQ = 0.6 * completeness + 0.4 * geometry
+    This correctly penalises datasets where many images have no labels at all.
     """
     label_files = list(Path(labels_dir).glob("*.txt"))
     if not label_files:
         return 0.0
 
+    files_with_annots = 0
     reasonable = 0
-    total = 0
+    total_boxes = 0
 
     for lf in label_files:
-        lines = lf.read_text().strip().splitlines()
+        lines = [l for l in lf.read_text().strip().splitlines() if l.strip()]
+        valid = 0
         for line in lines:
             parts = line.split()
             if len(parts) < 5:
                 continue
             w, h = float(parts[3]), float(parts[4])
             area = w * h
-            total += 1
-            # Reasonable range: bbox covers 0.5% ~ 70% of image
+            total_boxes += 1
             if 0.005 <= area <= 0.70:
                 reasonable += 1
+                valid += 1
+        if valid > 0:
+            files_with_annots += 1
 
-    return reasonable / total if total > 0 else 0.0
+    completeness = files_with_annots / len(label_files)
+    geometry = (reasonable / total_boxes) if total_boxes > 0 else 0.0
+    return 0.6 * completeness + 0.4 * geometry
 
 
 def compute_lighting_diversity(image_dir: str, n_buckets: int = 3) -> float:
@@ -196,14 +209,10 @@ def compute_diversity_clip(image_dir: str, sample_size: int = 100) -> float:
     Requires open_clip to be installed; falls back to pixel-based estimate.
     """
     try:
-        import open_clip
         import torch
         from PIL import Image as PILImage
 
-        model, _, preprocess = open_clip.create_model_and_transforms(
-            "ViT-B-32", pretrained="openai"
-        )
-        model.eval()
+        model, preprocess = _get_clip_model()
 
         image_paths = list(Path(image_dir).glob("*.jpg")) + list(Path(image_dir).glob("*.png"))
         if len(image_paths) < 2:
@@ -272,29 +281,90 @@ def _pixel_diversity_fallback(image_dir: str, sample_size: int = 50) -> float:
     return min(1.0, float(np.mean(distances)))
 
 
+def compute_sharpness(image_dir: str, sample_size: int = 100) -> float:
+    """
+    Image Quality (IQ) = geometric mean of blur_score and noise_cleanliness.
+
+    blur_score:       Laplacian variance after median denoise, capped at 500.
+                      Low for blurry images, high for sharp ones.
+    noise_cleanliness: 1 - normalised high-frequency residual std.
+                      Low for noisy images, high for clean ones.
+
+    IQ = sqrt(blur_score × noise_cleanliness) ∈ [0,1].
+    This way, EITHER blur OR noise degrades the score, independently.
+    """
+    BLUR_CAP = 500.0
+    NOISE_SIGMA_CAP = 25.0   # residual std above this → score ≈ 0
+
+    image_paths = (
+        list(Path(image_dir).glob("*.jpg")) + list(Path(image_dir).glob("*.png"))
+    )[:sample_size]
+
+    scores = []
+    for path in image_paths:
+        img = cv2.imread(str(path), cv2.IMREAD_GRAYSCALE)
+        if img is None:
+            continue
+
+        # Blur score
+        denoised = cv2.medianBlur(img, 3)
+        blur_score = min(float(cv2.Laplacian(denoised, cv2.CV_64F).var()) / BLUR_CAP, 1.0)
+
+        # Noise cleanliness
+        smooth = cv2.GaussianBlur(img, (5, 5), 1.5)
+        noise_std = float(np.std(img.astype(np.float32) - smooth.astype(np.float32)))
+        noise_cleanliness = max(0.0, 1.0 - noise_std / NOISE_SIGMA_CAP)
+
+        iq = math.sqrt(blur_score * noise_cleanliness)
+        scores.append(iq)
+
+    return float(np.mean(scores)) if scores else 0.0
+
+
+# ─── CLIP model cache (loaded once per process) ───────────────────────────────
+
+_clip_cache: dict = {}
+
+
+def _get_clip_model():
+    """Load and cache CLIP model (ViT-B-32) once per process."""
+    if "model" not in _clip_cache:
+        import open_clip
+        model, _, preprocess = open_clip.create_model_and_transforms(
+            "ViT-B-32", pretrained="openai"
+        )
+        model.eval()
+        _clip_cache["model"] = model
+        _clip_cache["preprocess"] = preprocess
+    return _clip_cache["model"], _clip_cache["preprocess"]
+
+
 # ─── Main extractor ───────────────────────────────────────────────────────────
 
 def extract_features(image_dir: str, labels_dir: str) -> DQSFeatures:
     """
-    Compute all five DQS features for a dataset.
+    Compute all six DQS features for a dataset.
     image_dir: directory containing .jpg/.png images
     labels_dir: directory containing YOLO .txt label files
     """
-    aq = compute_annotation_quality(labels_dir)
-    ds = compute_diversity_clip(image_dir)
-    ld = compute_lighting_diversity(image_dir)
+    aq  = compute_annotation_quality(labels_dir)
+    sh  = compute_sharpness(image_dir)
+    cd  = compute_diversity_clip(image_dir)
+    ld  = compute_lighting_diversity(image_dir)
     pd_ = compute_pose_diversity(labels_dir)
-    cb = compute_class_balance(labels_dir)
+    cb  = compute_class_balance(labels_dir)
 
     features = DQSFeatures(
         annotation_quality=aq,
-        diversity=ds,
+        sharpness=sh,
+        clip_diversity=cd,
         lighting_diversity=ld,
         pose_diversity=pd_,
         class_balance=cb,
     )
 
     logger.info(
-        f"DQS features — AQ={aq:.3f} DS={ds:.3f} LD={ld:.3f} PD={pd_:.3f} CB={cb:.3f}"
+        f"DQS features — AQ={aq:.3f} IQ={sh:.3f} CD={cd:.3f} "
+        f"LD={ld:.3f} PD={pd_:.3f} CB={cb:.3f}"
     )
     return features

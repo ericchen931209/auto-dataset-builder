@@ -1,0 +1,88 @@
+# Auto Dataset Builder — Quick Start
+# Usage: docker compose up
+# Then open: http://localhost:3000
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: adb_user
+      POSTGRES_PASSWORD: adb_password
+      POSTGRES_DB: adb_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U adb_user -d adb_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - POSTGRES_HOST=db
+      - POSTGRES_USER=adb_user
+      - POSTGRES_PASSWORD=adb_password
+      - POSTGRES_DB=adb_db
+      - REDIS_URL=redis://redis:6379/0
+      - DATASET_STORAGE_PATH=/app/datasets
+      - APP_ENV=development
+    volumes:
+      - dataset_storage:/app/datasets
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: celery -A workers.celery_app worker --loglevel=info --concurrency=2
+    environment:
+      - POSTGRES_HOST=db
+      - POSTGRES_USER=adb_user
+      - POSTGRES_PASSWORD=adb_password
+      - POSTGRES_DB=adb_db
+      - REDIS_URL=redis://redis:6379/0
+      - DATASET_STORAGE_PATH=/app/datasets
+    volumes:
+      - dataset_storage:/app/datasets
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  dataset_storage:

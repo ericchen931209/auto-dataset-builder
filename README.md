@@ -39,18 +39,22 @@ The system automates every stage of the dataset pipeline:
 ADB introduces a **learnable dataset quality metric** that predicts model mAP *before* training:
 
 ```
-f(D) = [AQ, DS, LD, PD, CB]  ∈ ℝ⁵
+f(D) = [AQ, IQ, CD, LD, PD, CB]  ∈ ℝ⁶
 
-  AQ — Annotation Quality     (bbox consistency)
-  DS — Diversity Score        (CLIP embedding entropy)
-  LD — Lighting Diversity     (brightness distribution)
+  AQ — Annotation Quality     (completeness + bbox geometry)
+  IQ — Image Quality          (√(blur_score × noise_cleanliness))
+  CD — CLIP Diversity         (mean pairwise cosine distance in CLIP space)
+  LD — Lighting Diversity     (brightness distribution entropy)
   PD — Pose Diversity         (aspect ratio distribution)
   CB — Class Balance          (1 - Gini coefficient)
 
-DQS(D) = MLP(f(D))  →  predicted mAP@0.5
+DQS(D) = Ridge(PolyFeatures(f(D)))  →  predicted mAP@0.5
 ```
 
-Hypothesis: **DQS ↑ ⟹ mAP ↑** (Pearson r > 0.85)
+Hypothesis: **DQS ↑ ⟹ mAP ↑**
+- CV Pearson r = **0.929** (n=96, 6-feature model with CLIP diversity)
+- Train r = 0.970 | CV R² = 0.854
+- Top features: CLIP diversity r=0.892, IQ (blur×noise) r=0.661
 
 ---
 
@@ -99,30 +103,51 @@ Natural Language Input
 
 ## Quick Start
 
-### Prerequisites
+**Five steps, one command:**
 
-- Docker & Docker Compose
-- (Optional) GPU for YOLO / SAM2 inference
+```
+1. Install Docker Desktop
+2. git clone https://github.com/ericchen931209/auto-dataset-builder
+3. cd auto-dataset-builder
+4. docker compose up
+5. Open http://localhost:3000
+```
 
-### Run with Docker
+### Detailed Steps
+
+#### Prerequisites
+
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/) (includes Docker Compose)
+- No GPU required — CPU mode works out of the box
+
+#### Run
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/auto-dataset-builder
+git clone https://github.com/ericchen931209/auto-dataset-builder
 cd auto-dataset-builder
-
-cp .env.example .env
-# Edit .env to set your Google Search API key (optional)
-
-docker-compose -f docker-compose.dev.yml up -d
+docker compose up
 ```
+
+> First run takes ~3 minutes to pull images and build containers.
 
 Services started:
 
 | Service | URL | Description |
 |---------|-----|-------------|
+| **Web UI** | http://localhost:3000 | Vue 3 dashboard — create datasets here |
 | API | http://localhost:8000 | FastAPI backend |
 | Docs | http://localhost:8000/docs | Swagger UI |
 | Flower | http://localhost:5555 | Celery task monitor |
+
+#### Optional: enable image search
+
+```bash
+# .env is auto-created with safe defaults.
+# To enable Google Image Search, add your API key:
+echo "GOOGLE_SEARCH_API_KEY=your_key_here" >> .env
+echo "GOOGLE_SEARCH_CX=your_cx_here" >> .env
+docker compose up --build
+```
 
 ### Create a Dataset via API
 
@@ -146,10 +171,19 @@ Response:
   "dqs_score": 0.74,
   "features": {
     "annotation_quality": 0.82,
-    "diversity": 0.68,
+    "sharpness": 0.61,
+    "clip_diversity": 0.49,
     "lighting_diversity": 0.71,
     "pose_diversity": 0.55,
-    "class_balance": 1.0
+    "class_balance": 0.92
+  },
+  "shap_values": {
+    "clip_diversity": 0.068,
+    "sharpness": 0.019,
+    "annotation_quality": 0.011,
+    "lighting_diversity": 0.007,
+    "pose_diversity": 0.004,
+    "class_balance": 0.003
   }
 }
 ```
@@ -250,6 +284,13 @@ python3 tests/test_integration.py
 
 # Benchmark
 python3 tools/benchmark.py --images 100 --outfile results.json
+
+# DQS training data collection (96 variants, 15 epochs each)
+python3 tools/collect_dqs_data.py --epochs 15 --variants 97 --outfile data/dqs_training_data_v5.csv
+
+# Train Neural DQS
+python3 tools/train_neural_dqs.py --data data/dqs_training_data_v5.csv --plot
+# Results: train r=0.970, CV r=0.929, CV R²=0.854
 ```
 
 CI runs automatically on every push via GitHub Actions.

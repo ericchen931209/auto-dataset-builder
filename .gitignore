@@ -28,6 +28,18 @@ models/dqs/checkpoints/*.pt
 datasets/
 /app/datasets/
 
+# Frontend dependencies
+frontend/node_modules/
+
+# Intermediate DQS experiment CSVs (keep only v5)
+data/dqs_training_data_clip.csv
+data/dqs_training_data_full.csv
+data/dqs_training_data_final.csv
+data/dqs_training_data_v[0-4].csv
+data/dqs_training_data_sh15.csv
+data/dqs_training_data_xpu15.csv
+data/dqs_training_data_*.report.json
+
 # IDE
 .vscode/
 .idea/

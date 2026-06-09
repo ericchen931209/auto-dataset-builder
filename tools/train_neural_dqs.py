@@ -20,8 +20,8 @@ import numpy as np
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 FEATURE_COLS = [
-    "annotation_quality", "diversity", "lighting_diversity",
-    "pose_diversity", "class_balance",
+    "annotation_quality", "sharpness", "clip_diversity",
+    "lighting_diversity", "pose_diversity", "class_balance",
 ]
 TARGET_COL = "map50"
 DEFAULT_MODEL_PATH = "models/dqs/neural_dqs_model.pkl"

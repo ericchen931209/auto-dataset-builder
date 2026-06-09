@@ -49,7 +49,8 @@ class ExperimentRecord:
     n_images: int
     # DQS features
     annotation_quality: float
-    diversity: float
+    sharpness: float
+    clip_diversity: float
     lighting_diversity: float
     pose_diversity: float
     class_balance: float
@@ -111,6 +112,44 @@ def _add_gaussian_noise(img: np.ndarray, sigma: float) -> np.ndarray:
 
 def _adjust_brightness(img: np.ndarray, factor: float) -> np.ndarray:
     return np.clip(img.astype(np.float32) * factor, 0, 255).astype(np.uint8)
+
+
+def _copy_labels_with_missing(src_lbls: list[str], out_lbl: str, missing_frac: float,
+                               rng: random.Random) -> None:
+    """Copy labels but blank out missing_frac of them (simulates annotation gaps)."""
+    Path(out_lbl).mkdir(parents=True, exist_ok=True)
+    for lp in src_lbls:
+        dst = os.path.join(out_lbl, Path(lp).name)
+        if rng.random() < missing_frac:
+            Path(dst).write_text("")   # empty = no annotations
+        elif Path(lp).exists():
+            shutil.copy2(lp, dst)
+        else:
+            Path(dst).write_text("")
+
+
+def _copy_labels_with_noise(src_lbls: list[str], out_lbl: str, shift_frac: float,
+                             rng: random.Random) -> None:
+    """Copy labels with random bbox shifts (simulates annotation noise)."""
+    Path(out_lbl).mkdir(parents=True, exist_ok=True)
+    for lp in src_lbls:
+        dst = os.path.join(out_lbl, Path(lp).name)
+        if not Path(lp).exists():
+            Path(dst).write_text("")
+            continue
+        lines_out = []
+        for line in Path(lp).read_text().strip().splitlines():
+            parts = line.split()
+            if len(parts) == 5:
+                cls, cx, cy, w, h = parts
+                cx = float(cx) + rng.uniform(-shift_frac, shift_frac)
+                cy = float(cy) + rng.uniform(-shift_frac, shift_frac)
+                cx = max(0.01, min(0.99, cx))
+                cy = max(0.01, min(0.99, cy))
+                lines_out.append(f"{cls} {cx:.6f} {cy:.6f} {w} {h}")
+            else:
+                lines_out.append(line)
+        Path(dst).write_text("\n".join(lines_out))
 
 
 def build_variants(
@@ -215,7 +254,7 @@ def build_variants(
         ("noise+blur",   lambda img: cv2.GaussianBlur(_add_gaussian_noise(img, 15), (7, 7), 0)),
         ("dark+blur",    lambda img: cv2.GaussianBlur(_adjust_brightness(img, 0.5), (11, 11), 0)),
         ("heavy_degrade",lambda img: cv2.GaussianBlur(_adjust_brightness(_add_gaussian_noise(img, 30), 0.4), (15, 15), 0)),
-        ("small_clean",  None),   # clean but very few images
+        ("small_clean",  None),
     ]
     for i, (dtype, tfm) in enumerate(degradations):
         k = 15 if dtype == "small_clean" else max(10, int(n * 0.5))
@@ -223,6 +262,144 @@ def build_variants(
         _make_variant(
             f"v{i+25:02d}_{dtype.replace('+', '_')}",
             dtype,
+            [img_paths[j] for j in sel],
+            [lbl_paths[j] for j in sel],
+            transform_img=tfm,
+        )
+
+    # 30–35. Label-missing variants (AQ drops as more labels removed)
+    for i, miss_frac in enumerate([0.1, 0.2, 0.3, 0.5, 0.7, 0.9]):
+        vid = f"v{i+30:02d}_lbl_miss_{int(miss_frac*100)}"
+        vdir = os.path.join(base_dir, vid)
+        out_img = os.path.join(vdir, "images", "train")
+        out_lbl = os.path.join(vdir, "labels", "train")
+        Path(out_img).mkdir(parents=True, exist_ok=True)
+        sel = rng.sample(list(range(n)), max(10, int(n * 0.7)))
+        s_imgs = [img_paths[j] for j in sel]
+        s_lbls = [lbl_paths[j] for j in sel]
+        for ip in s_imgs:
+            shutil.copy2(ip, out_img)
+        _copy_labels_with_missing(s_lbls, out_lbl, miss_frac, rng)
+        variants.append({"id": vid, "type": "label_missing",
+                         "img_dir": out_img, "lbl_dir": out_lbl,
+                         "n_images": len(s_imgs)})
+
+    # 36–38. Label-noise variants (AQ drops as bbox shift increases)
+    for i, shift in enumerate([0.03, 0.10, 0.20]):
+        vid = f"v{i+36:02d}_lbl_noise_{int(shift*100)}"
+        vdir = os.path.join(base_dir, vid)
+        out_img = os.path.join(vdir, "images", "train")
+        out_lbl = os.path.join(vdir, "labels", "train")
+        Path(out_img).mkdir(parents=True, exist_ok=True)
+        sel = rng.sample(list(range(n)), max(10, int(n * 0.7)))
+        s_imgs = [img_paths[j] for j in sel]
+        s_lbls = [lbl_paths[j] for j in sel]
+        for ip in s_imgs:
+            shutil.copy2(ip, out_img)
+        _copy_labels_with_noise(s_lbls, out_lbl, shift, rng)
+        variants.append({"id": vid, "type": "label_noise",
+                         "img_dir": out_img, "lbl_dir": out_lbl,
+                         "n_images": len(s_imgs)})
+
+    # 39–43. Extra blur gradations (finer steps)
+    for i, ksize in enumerate([5, 9, 15, 25, 35]):
+        k = max(10, int(n * 0.7))
+        sel = rng.sample(list(range(n)), k)
+        k_val = ksize
+        _make_variant(
+            f"v{i+39:02d}_blur2_k{ksize}",
+            "blur",
+            [img_paths[j] for j in sel],
+            [lbl_paths[j] for j in sel],
+            transform_img=lambda img, kz=k_val: cv2.GaussianBlur(img, (kz|1, kz|1), 0),
+        )
+
+    # 44–51. More noise gradations (fill in the curve)
+    for i, sigma in enumerate([2, 8, 12, 20, 30, 40, 60, 100]):
+        k = max(10, int(n * 0.7))
+        sel = rng.sample(list(range(n)), k)
+        s_val = sigma
+        _make_variant(
+            f"v{i+44:02d}_noise2_s{sigma}",
+            "noise",
+            [img_paths[j] for j in sel],
+            [lbl_paths[j] for j in sel],
+            transform_img=lambda img, s=s_val: _add_gaussian_noise(img, s),
+        )
+
+    # 52–58. More brightness levels (dark + overexposed)
+    for i, factor in enumerate([0.1, 0.15, 0.25, 0.35, 0.55, 0.7, 0.9]):
+        k = max(10, int(n * 0.6))
+        sel = rng.sample(list(range(n)), k)
+        f_val = factor
+        _make_variant(
+            f"v{i+52:02d}_bright2_{int(factor*100)}",
+            "brightness",
+            [img_paths[j] for j in sel],
+            [lbl_paths[j] for j in sel],
+            transform_img=lambda img, f=f_val: _adjust_brightness(img, f),
+        )
+
+    # 59–65. More label-missing gradations
+    for i, miss_frac in enumerate([0.15, 0.25, 0.35, 0.45, 0.55, 0.65, 0.80]):
+        vid = f"v{i+59:02d}_lbl_miss2_{int(miss_frac*100)}"
+        vdir = os.path.join(base_dir, vid)
+        out_img = os.path.join(vdir, "images", "train")
+        out_lbl = os.path.join(vdir, "labels", "train")
+        Path(out_img).mkdir(parents=True, exist_ok=True)
+        sel = rng.sample(list(range(n)), max(10, int(n * 0.7)))
+        s_imgs = [img_paths[j] for j in sel]
+        s_lbls = [lbl_paths[j] for j in sel]
+        for ip in s_imgs:
+            shutil.copy2(ip, out_img)
+        _copy_labels_with_missing(s_lbls, out_lbl, miss_frac, rng)
+        variants.append({"id": vid, "type": "label_missing",
+                         "img_dir": out_img, "lbl_dir": out_lbl,
+                         "n_images": len(s_imgs)})
+
+    # 66–80. Dense blur sweep (k=2,4,6,8,12,14,17,20,28,34,38,45,51,55,61)
+    for i, ksize in enumerate([2,4,6,8,12,14,17,20,28,34,38,45,51,55,61]):
+        k = max(10, int(n * 0.7))
+        sel = rng.sample(list(range(n)), k)
+        k_val = ksize
+        _make_variant(
+            f"v{i+66:02d}_blur3_k{ksize}",
+            "blur",
+            [img_paths[j] for j in sel],
+            [lbl_paths[j] for j in sel],
+            transform_img=lambda img, kz=k_val: cv2.GaussianBlur(img, (kz|1, kz|1), 0),
+        )
+
+    # 81–88. Overexposed + more extreme dark
+    for i, factor in enumerate([0.05, 0.08, 0.12, 0.18, 1.1, 1.3, 1.6, 2.0]):
+        k = max(10, int(n * 0.6))
+        sel = rng.sample(list(range(n)), k)
+        f_val = factor
+        _make_variant(
+            f"v{i+81:02d}_bright3_{int(factor*100)}",
+            "brightness",
+            [img_paths[j] for j in sel],
+            [lbl_paths[j] for j in sel],
+            transform_img=lambda img, f=f_val: _adjust_brightness(img, f),
+        )
+
+    # 89–96. More combined degradations
+    combos = [
+        ("blur_dark_mild",   lambda img: cv2.GaussianBlur(_adjust_brightness(img, 0.7), (7,7), 0)),
+        ("blur_dark_mod",    lambda img: cv2.GaussianBlur(_adjust_brightness(img, 0.5), (15,15), 0)),
+        ("blur_dark_heavy",  lambda img: cv2.GaussianBlur(_adjust_brightness(img, 0.3), (25,25), 0)),
+        ("noise_dark_mild",  lambda img: _adjust_brightness(_add_gaussian_noise(img, 10), 0.7)),
+        ("noise_dark_mod",   lambda img: _adjust_brightness(_add_gaussian_noise(img, 25), 0.5)),
+        ("noise_blur_mild",  lambda img: cv2.GaussianBlur(_add_gaussian_noise(img, 8), (5,5), 0)),
+        ("noise_blur_mod",   lambda img: cv2.GaussianBlur(_add_gaussian_noise(img, 20), (11,11), 0)),
+        ("noise_blur_heavy", lambda img: cv2.GaussianBlur(_add_gaussian_noise(img, 40), (21,21), 0)),
+    ]
+    for i, (cname, tfm) in enumerate(combos):
+        k = max(10, int(n * 0.6))
+        sel = rng.sample(list(range(n)), k)
+        _make_variant(
+            f"v{i+89:02d}_{cname}",
+            "combined",
             [img_paths[j] for j in sel],
             [lbl_paths[j] for j in sel],
             transform_img=tfm,
@@ -239,7 +416,8 @@ def compute_dqs_features(img_dir: str, lbl_dir: str) -> dict:
         feats = extract_features(img_dir, lbl_dir)
         return {
             "annotation_quality": round(feats.annotation_quality, 4),
-            "diversity":          round(feats.diversity, 4),
+            "sharpness":          round(feats.sharpness, 4),
+            "clip_diversity":     round(feats.clip_diversity, 4),
             "lighting_diversity": round(feats.lighting_diversity, 4),
             "pose_diversity":     round(feats.pose_diversity, 4),
             "class_balance":      round(feats.class_balance, 4),
@@ -247,7 +425,7 @@ def compute_dqs_features(img_dir: str, lbl_dir: str) -> dict:
     except Exception as e:
         print(f"    [DQS warn] {e}")
         return {k: 0.0 for k in
-                ["annotation_quality","diversity","lighting_diversity",
+                ["annotation_quality","sharpness","clip_diversity","lighting_diversity",
                  "pose_diversity","class_balance"]}
 
 
@@ -274,6 +452,7 @@ def run_yolo_experiment(
     project_dir: str,
     epochs: int,
     img_size: int,
+    device: str = "cpu",
 ) -> tuple[float, float]:
     """
     Fine-tune YOLOv11n on variant for `epochs` epochs.
@@ -306,7 +485,7 @@ def run_yolo_experiment(
         verbose=False,
         plots=False,
         save=False,
-        device="cpu",
+        device=device,
     )
 
     map50    = float(results.results_dict.get("metrics/mAP50(B)", 0.0))
@@ -350,6 +529,7 @@ def main():
     parser.add_argument("--epochs",    type=int, default=DEFAULT_EPOCHS)
     parser.add_argument("--imgsize",   type=int, default=IMG_SIZE)
     parser.add_argument("--outfile",   type=str, default="dqs_training_data.csv")
+    parser.add_argument("--device",    type=str, default="cpu", help="Training device: cpu, cuda, xpu")
     parser.add_argument("--quick",     action="store_true",
                         help="Skip YOLO training; use confidence proxy (fast, no GPU needed)")
     parser.add_argument("--resume",    action="store_true",
@@ -406,7 +586,8 @@ def main():
                 else:
                     map50, map50_95 = run_yolo_experiment(
                         variant, coco128_yaml, project_dir,
-                        epochs=args.epochs, img_size=args.imgsize
+                        epochs=args.epochs, img_size=args.imgsize,
+                        device=args.device,
                     )
             except Exception as e:
                 print(f"\n    [WARN] YOLO failed: {e}")

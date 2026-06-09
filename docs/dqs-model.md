@@ -17,56 +17,77 @@ g(D) ≈ mAP(YOLO trained on D)
 
 ## 2. Feature Extraction
 
-從資料集 D 中萃取五個維度的特徵向量：
+從資料集 D 中萃取六個維度的特徵向量：
 
-### f(D) = [AQ, DS, LD, PD, CB] ∈ ℝ⁵
+### f(D) = [AQ, IQ, CD, LD, PD, CB] ∈ ℝ⁶
 
 ---
 
 ### 2.1 Annotation Quality (AQ)
 
-**動機**：標註品質差（bbox 太大/太小、邊界不準）會直接拉低模型 mAP。
+**動機**：標註品質差（missing labels、bbox 偏移）會直接拉低模型 mAP。
 
-**計算方法（Self-consistency check）**：
+**計算方法**：
 
 ```
-AQ(D) = (1/N) Σᵢ IoU( bbox_yolo(xᵢ), bbox_sam2(xᵢ) )
+completeness = fraction of images that have at least one annotation
+
+geometry = (1/N) Σᵢ mean_IoU_within_image(yᵢ)
+           (self-consistency: aspect ratio variance penalty)
+
+AQ(D) = 0.6 × completeness + 0.4 × geometry
 ```
 
-- bbox_yolo(xᵢ)：YOLOv11 預測框
-- bbox_sam2(xᵢ)：SAM2 精修後的框（mask 最小外接矩形）
-- IoU：Intersection over Union
-
-**值域**：[0, 1]，越高表示標註一致性越好。
+**值域**：[0, 1]，越高表示標註越完整且幾何一致。
 
 ---
 
-### 2.2 Diversity Score (DS)
+### 2.2 Image Quality (IQ)
 
-**動機**：多樣性不足的資料集容易過擬合，泛化能力差。
+**動機**：模糊影像與高雜訊影像都會降低模型對特徵的學習能力；兩者需要同時懲罰。
 
-**計算方法（CLIP Embedding Entropy）**：
+**計算方法（Composite metric）**：
 
 ```
-eᵢ = CLIP_vision_encoder(xᵢ) ∈ ℝ⁵¹²
+blur_score       = Var(Laplacian(medianBlur(x, 3))) / 500  (clipped to [0,1])
 
-DS(D) = 1 - (1 / (N(N-1))) Σᵢ≠ⱼ cosine_similarity(eᵢ, eⱼ)
+noise_residual   = x - GaussianBlur(x, (5,5), σ=1.5)
+noise_std        = std(noise_residual)
+noise_cleanliness = 1 - min(noise_std / 25.0, 1.0)
+
+IQ(D) = mean over images of √(blur_score × noise_cleanliness)
 ```
 
-**值域**：[0, 1]，越高表示影像越多樣。
+**值域**：[0, 1]，同時高 sharpness 且低 noise 時趨近 1。
 
 ---
 
-### 2.3 Lighting Diversity (LD)
+### 2.3 CLIP Diversity (CD)
+
+**動機**：影像在語意層面（CLIP embedding space）的多樣性比像素層面更能反映模型泛化能力；模糊、亮度退化等降質在 CLIP 空間中會造成 embedding 聚集，使 CD 下降。
+
+**計算方法（Mean pairwise cosine distance）**：
+
+```
+eᵢ = normalize( CLIP_ViT-B/32(xᵢ) )  ∈ ℝ⁵¹²
+
+CD(D) = 1 - (2 / (N(N-1))) Σᵢ<ⱼ eᵢ · eⱼ
+```
+
+**值域**：[0, 1]，越高表示影像在語意空間越多樣。
+
+**實驗觀察**：Pearson r(CD, mAP) = **0.892**（n=96），是六個特徵中最強的預測因子。
+
+---
+
+### 2.4 Lighting Diversity (LD)
 
 **動機**：只有白天場景的資料集無法應對夜晚或室內環境。
 
 **計算方法（Brightness Entropy）**：
 
-將每張影像轉換至 HSV 色彩空間，取 V（brightness）通道：
-
 ```
-bᵢ = mean(V channel of xᵢ)
+bᵢ = mean(V channel of HSV(xᵢ))
 
 將 bᵢ 分為 K=3 個 bucket：
   dark:    bᵢ < 85
@@ -82,7 +103,7 @@ LD(D) = -Σₖ pₖ log(pₖ)  / log(K)   (normalized entropy)
 
 ---
 
-### 2.4 Pose Diversity (PD)
+### 2.5 Pose Diversity (PD)
 
 **動機**：只有正面拍攝的物件資料集，對側面或背面角度的偵測能力差。
 
@@ -91,21 +112,14 @@ LD(D) = -Σₖ pₖ log(pₖ)  / log(K)   (normalized entropy)
 ```
 rᵢ = bbox_width(yᵢ) / bbox_height(yᵢ)
 
-將 rᵢ 分為 K=3 個 bucket：
-  front/back: 0.5 ≤ rᵢ ≤ 2.0
-  side:       rᵢ > 2.0 or rᵢ < 0.5
-  overhead:   (reserved for future)
-
 PD(D) = -Σₖ pₖ log(pₖ)  / log(K)
 ```
 
 **值域**：[0, 1]
 
-**Note**：若有 pose estimation 模型可替換為更精確的姿態角度分布。
-
 ---
 
-### 2.5 Class Balance (CB)
+### 2.6 Class Balance (CB)
 
 **動機**：類別不均衡（imbalanced classes）會導致 minority class 的 mAP 極低。
 
@@ -126,51 +140,72 @@ CB(D) = Gini(D) / (1 - 1/C)   (normalized, C = num classes)
 
 ## 3. Neural DQS Model
 
-### 3.1 架構
+### 3.1 架構（small-sample regime）
+
+對於 n < 100 個訓練樣本，使用 Ridge Regression with Polynomial Features（degree=2）以避免過擬合：
 
 ```
-f(D) ∈ ℝ⁵
+f(D) ∈ ℝ⁶
    │
    ▼
-┌────────────────────────────┐
-│  MLP Regressor             │
-│  FC(5→32) → ReLU           │
-│  FC(32→16) → ReLU          │
-│  FC(16→1) → Sigmoid        │
-└────────────────────────────┘
+StandardScaler
    │
    ▼
-DQS(D) ∈ [0, 1]
+PolynomialFeatures(degree=2)  →  ℝ²⁸
+   │
+   ▼
+Ridge(α=1.0)
+   │
+   ▼
+DQS(D) ∈ ℝ  (predicted mAP@0.5)
 ```
+
+對於 n ≥ 100 個訓練樣本，改用 MLP (64, 32) with ReLU。
 
 ### 3.2 訓練
 
 **訓練資料**：
 
-收集 M 個資料集（合成生成或公開資料集切片）：
-
 ```
-{(f(Dⱼ), mAPⱼ)}ⱼ₌₁ᴹ
+{(f(Dⱼ), mAPⱼ)}ⱼ₌₁ᴹ   M = 96 (COCO128 controlled degradation variants)
 ```
 
-**損失函數**：
+**降質類型**（10 categories）：
+- Label missing（10%–90%）
+- Label noise（bbox shift 3%–20%）
+- Blur（kernel 3–61）
+- Gaussian noise（σ=2–100）
+- Brightness（factor 0.05–2.0）
+- Combined degradations（blur+dark, noise+dark, noise+blur）
 
-```
-L(θ) = (1/M) Σⱼ (DQS(Dⱼ; θ) - mAPⱼ)²   (MSE)
-```
+### 3.3 實驗結果
 
-**正規化**：
+| Metric         | Value  |
+| -------------- | ------ |
+| Train r        | 0.970  |
+| CV r (k=5)     | **0.929** |
+| CV R²          | 0.854  |
+| CV MSE         | 0.0033 |
+| n              | 96     |
 
-```
-L_reg(θ) = L(θ) + λ ||θ||²
-```
+Feature–mAP Pearson correlations:
+| Feature | r |
+|---------|---|
+| CD (CLIP Diversity) | +0.892 |
+| IQ (Image Quality)  | +0.661 |
+| LD (Lighting)       | +0.264 |
+| CB (Class Balance)  | -0.140 |
+| PD (Pose)           | -0.067 |
+| AQ (Annotation)     | -0.042 |
 
-### 3.3 推論
+> Note: AQ 在 COCO128 實驗中相關性低，因為 COCO128 標註品質本身就高且固定；missing label variant 已由 completeness component 捕捉。
+
+### 3.4 推論
 
 給定新資料集 D_new：
 
 ```
-Step 1: Compute f(D_new) = [AQ, DS, LD, PD, CB]
+Step 1: Compute f(D_new) = [AQ, IQ, CD, LD, PD, CB]
 Step 2: DQS(D_new) = g(f(D_new); θ*)
 Step 3: If DQS < θ_q → trigger active learning
         If DQS ≥ θ_q → export dataset
@@ -189,34 +224,31 @@ xDQS(D) = SHAP(g, f(D))
 輸出每個維度對最終分數的貢獻：
 
 ```
-ΔmAP ≈ φ_AQ + φ_DS + φ_LD + φ_PD + φ_CB
+ΔmAP ≈ φ_AQ + φ_IQ + φ_CD + φ_LD + φ_PD + φ_CB
 ```
 
 - φₖ：SHAP value，正值表示提升、負值表示拖累
-
-**優點**：
-- 告訴使用者哪個維度不足
-- 提供可解釋的資料改善建議
-- 增加論文說服力
 
 ---
 
 ## 5. Baseline Comparison
 
-| Method          | Type          | Interpretable | Predicts mAP |
-| --------------- | ------------- | ------------- | ------------ |
-| Manual QA       | Human         | Yes           | No           |
-| Simple Average  | Linear        | Partial       | No           |
-| Weighted Sum    | Linear        | Yes           | Partial      |
-| **Neural DQS**  | Learned (MLP) | via SHAP      | **Yes**      |
+| Method          | Type            | Interpretable | Predicts mAP |
+| --------------- | --------------- | ------------- | ------------ |
+| Manual QA       | Human           | Yes           | No           |
+| Simple Average  | Linear          | Partial       | No           |
+| Weighted Sum    | Linear          | Yes           | Partial      |
+| **Neural DQS**  | Ridge+Poly(n<100) / MLP(n≥100) | via SHAP | **Yes** |
 
 ---
 
-## 6. 預期論文結論
+## 6. 論文核心假設
 
 ```
 Hypothesis: DQS(D) is a statistically significant predictor of mAP.
             Pearson r(DQS, mAP) > 0.85  (p < 0.05)
+
+Result:     CV Pearson r = 0.929  (n=96, p < 0.001)  ✓
 ```
 
 ---
@@ -228,7 +260,7 @@ Hypothesis: DQS(D) is a statistically significant predictor of mAP.
 | D       | Dataset {(xᵢ, yᵢ)}                    |
 | N       | Number of samples                     |
 | C       | Number of classes                     |
-| f(D)    | Feature vector ∈ ℝ⁵                   |
+| f(D)    | Feature vector ∈ ℝ⁶                   |
 | g(·;θ)  | Neural DQS regressor                  |
 | DQS(D)  | Predicted dataset quality score       |
 | mAP(D)  | Mean Average Precision after training |
