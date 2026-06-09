@@ -353,6 +353,129 @@ def test_pipeline_summary_fields():
     assert isinstance(s.results, list)
 
 
+# ─── Test: Uncertainty Sampler ───────────────────────────────────────────────
+
+def test_uncertainty_sampler_no_labels():
+    """Images with no label file are treated as fully uncertain (score=0.0)."""
+    from workers.active_learning.uncertainty_sampler import sample_uncertain_images
+    with tempfile.TemporaryDirectory() as imgd, tempfile.TemporaryDirectory() as lbld:
+        make_image(f"{imgd}/a.jpg")
+        make_image(f"{imgd}/b.jpg")
+        # No label files created
+        result = sample_uncertain_images(imgd, lbld, strategy="min_conf", threshold=0.5)
+        assert len(result) == 2
+        assert all(r.score == 0.0 for r in result)
+        assert all(r.num_boxes == 0 for r in result)
+
+def test_uncertainty_sampler_high_conf_excluded():
+    """Images whose min-conf is above threshold are not returned."""
+    from workers.active_learning.uncertainty_sampler import sample_uncertain_images
+    with tempfile.TemporaryDirectory() as imgd, tempfile.TemporaryDirectory() as lbld:
+        make_image(f"{imgd}/a.jpg")
+        # Label file with high-confidence box (6th column = conf)
+        with open(f"{lbld}/a.txt", "w") as f:
+            f.write("0 0.5 0.5 0.3 0.2 0.95\n")
+        result = sample_uncertain_images(imgd, lbld, strategy="min_conf", threshold=0.5)
+        assert len(result) == 0   # conf=0.95 > threshold=0.5 → not uncertain
+
+def test_uncertainty_sampler_low_conf_included():
+    """Images whose min-conf is below threshold are returned."""
+    from workers.active_learning.uncertainty_sampler import sample_uncertain_images
+    with tempfile.TemporaryDirectory() as imgd, tempfile.TemporaryDirectory() as lbld:
+        make_image(f"{imgd}/a.jpg")
+        with open(f"{lbld}/a.txt", "w") as f:
+            f.write("0 0.5 0.5 0.3 0.2 0.30\n")   # conf=0.30 < 0.5
+        result = sample_uncertain_images(imgd, lbld, strategy="min_conf", threshold=0.5)
+        assert len(result) == 1
+        assert result[0].min_confidence == 0.30
+
+def test_uncertainty_sampler_top_k():
+    """top_k limits number of returned samples."""
+    from workers.active_learning.uncertainty_sampler import sample_uncertain_images
+    with tempfile.TemporaryDirectory() as imgd, tempfile.TemporaryDirectory() as lbld:
+        for i in range(5):
+            make_image(f"{imgd}/{i}.jpg")
+            # All uncertain (no labels)
+        result = sample_uncertain_images(imgd, lbld, strategy="min_conf",
+                                         threshold=0.5, top_k=3)
+        assert len(result) == 3
+
+def test_uncertainty_sampler_entropy():
+    """Entropy strategy flags images with high class-distribution uncertainty."""
+    from workers.active_learning.uncertainty_sampler import sample_uncertain_images
+    with tempfile.TemporaryDirectory() as imgd, tempfile.TemporaryDirectory() as lbld:
+        make_image(f"{imgd}/a.jpg")
+        # Two equally-distributed classes → max entropy
+        with open(f"{lbld}/a.txt", "w") as f:
+            f.write("0 0.5 0.5 0.3 0.2\n")
+            f.write("1 0.2 0.2 0.1 0.1\n")
+        result = sample_uncertain_images(imgd, lbld, strategy="entropy", threshold=0.0)
+        assert len(result) == 1
+        assert result[0].score > 0   # entropy > 0 for 2 classes
+
+
+# ─── Test: Convergence Checker ────────────────────────────────────────────────
+
+def test_convergence_stops_at_threshold():
+    """ConvergenceChecker stops when DQS >= dqs_threshold."""
+    from workers.active_learning.convergence_checker import ConvergenceChecker, StopReason
+    checker = ConvergenceChecker(dqs_threshold=0.75, max_iterations=10)
+    result = checker.step(dqs_score=0.80, uncertain_count=5)
+    assert result.should_stop is True
+    assert result.reason == StopReason.DQS_THRESHOLD
+
+def test_convergence_stops_at_max_iterations():
+    """ConvergenceChecker stops after max_iterations regardless of DQS."""
+    from workers.active_learning.convergence_checker import ConvergenceChecker, StopReason
+    checker = ConvergenceChecker(dqs_threshold=0.99, max_iterations=3)
+    for _ in range(2):
+        r = checker.step(dqs_score=0.50, uncertain_count=5)
+        assert not r.should_stop
+    r = checker.step(dqs_score=0.50, uncertain_count=5)
+    assert r.should_stop
+    assert r.reason == StopReason.MAX_ITERATIONS
+
+def test_convergence_stops_no_uncertain():
+    """ConvergenceChecker stops when no uncertain images remain."""
+    from workers.active_learning.convergence_checker import ConvergenceChecker, StopReason
+    checker = ConvergenceChecker(dqs_threshold=0.99, max_iterations=10)
+    result = checker.step(dqs_score=0.50, uncertain_count=0)
+    assert result.should_stop is True
+    assert result.reason == StopReason.NO_UNCERTAIN
+
+def test_convergence_stops_stalled():
+    """ConvergenceChecker stops when DQS improvement stalls."""
+    from workers.active_learning.convergence_checker import ConvergenceChecker, StopReason
+    checker = ConvergenceChecker(dqs_threshold=0.99, max_iterations=20, min_delta=0.01, window=2)
+    # Feed 3 nearly identical DQS values
+    checker.step(0.60, 5)
+    checker.step(0.601, 5)
+    r = checker.step(0.6015, 5)  # delta over window ≈ 0.0015 < 0.01
+    assert r.should_stop is True
+    assert r.reason == StopReason.DQS_STALLED
+
+def test_convergence_continues_when_improving():
+    """ConvergenceChecker continues when DQS is improving and below threshold."""
+    from workers.active_learning.convergence_checker import ConvergenceChecker, StopReason
+    checker = ConvergenceChecker(dqs_threshold=0.99, max_iterations=20, min_delta=0.01, window=2)
+    r1 = checker.step(0.50, 10)
+    r2 = checker.step(0.60, 8)   # +0.10 > 0.01 → not stalled
+    assert not r1.should_stop
+    assert not r2.should_stop
+
+def test_convergence_summary_fields():
+    """ConvergenceChecker.summary() returns all expected keys."""
+    from workers.active_learning.convergence_checker import ConvergenceChecker
+    checker = ConvergenceChecker()
+    checker.step(0.5, 3)
+    checker.step(0.6, 2)
+    s = checker.summary()
+    assert "total_iterations" in s
+    assert "final_dqs" in s
+    assert "history" in s
+    assert len(s["history"]) == 2
+
+
 # ─── Run all ──────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
@@ -389,6 +512,17 @@ if __name__ == "__main__":
     test("LLM: empty box list handled",            test_llm_verifier_empty_input)
     test("Pipeline: empty input → empty summary",  test_pipeline_empty_input)
     test("Pipeline: summary fields correct",       test_pipeline_summary_fields)
+    test("AL Sampler: no labels → uncertain",       test_uncertainty_sampler_no_labels)
+    test("AL Sampler: high conf excluded",          test_uncertainty_sampler_high_conf_excluded)
+    test("AL Sampler: low conf included",           test_uncertainty_sampler_low_conf_included)
+    test("AL Sampler: top_k limits results",        test_uncertainty_sampler_top_k)
+    test("AL Sampler: entropy strategy",            test_uncertainty_sampler_entropy)
+    test("AL Convergence: stops at DQS threshold", test_convergence_stops_at_threshold)
+    test("AL Convergence: stops at max iterations",test_convergence_stops_at_max_iterations)
+    test("AL Convergence: stops no uncertain",     test_convergence_stops_no_uncertain)
+    test("AL Convergence: stops when stalled",     test_convergence_stops_stalled)
+    test("AL Convergence: continues improving",    test_convergence_continues_when_improving)
+    test("AL Convergence: summary fields",         test_convergence_summary_fields)
 
     print()
     passed = sum(1 for _, ok, _ in results if ok)

@@ -13,7 +13,7 @@ V0.3  ████████████░░░░░░░░  Auto Annotat
 V0.4  ████████████████░░░░  Dataset Cleaning
 V0.5  ████████████████████  SAM2 + LLM Verification
 V0.6  ████████████████████  Neural DQS
-V0.7  ████████████████████  Active Learning
+V0.7  ████████████████████  Active Learning ✓
 V0.8  ████████████████████  Web Dashboard
 V0.9  ████████████████████  Version Control + Export
 V1.0  ████████████████████  Full Release + Paper
@@ -182,26 +182,30 @@ models/
 
 ---
 
-## V0.7 — Active Learning Loop
+## V0.7 — Active Learning Loop ✅ DONE (2026-06-09)
 
 **目標**：實現自動化資料飛輪。
 
 ### Issues / Tasks
 
-- [ ] 低信心樣本篩選（conf < 0.5）
-- [ ] 觸發重新標註流程
-- [ ] DQS threshold 達標停止條件
-- [ ] 迭代歷史記錄（每輪 mAP + DQS）
-- [ ] max_iterations 安全上限
+- [x] 低信心樣本篩選（min_conf / mean_conf / entropy 三種策略）
+- [x] top_k 控制每輪重標數量上限
+- [x] 觸發三階段重新標註流程
+- [x] DQS threshold 達標停止條件
+- [x] DQS stall 偵測（sliding window delta）
+- [x] max_iterations 安全上限
+- [x] 迭代歷史記錄（每輪 DQS + Δ + uncertain_count）
+- [x] JSON-serialisable summary（可存入 DB 或 API 回傳）
+- [x] 11 個單元測試
 
 ### Deliverables
 
 ```
 workers/
   active_learning/
-    uncertainty_sampler.py
-    al_loop.py
-    convergence_checker.py
+    uncertainty_sampler.py    (三種 uncertainty 策略)
+    convergence_checker.py    (stateful 終止條件管理)
+    al_loop.py                (整合 orchestrator)
 ```
 
 ---
