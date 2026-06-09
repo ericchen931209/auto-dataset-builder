@@ -205,18 +205,21 @@ workers/
 
 ---
 
-## V0.8 — Web Dashboard
+## V0.8 — Web Dashboard ✅ DONE (2026-06-09)
 
 **目標**：可視化操作介面，讓使用者監控整個 pipeline。
 
 ### Issues / Tasks
 
-- [ ] Vue 3 + Vite 前端架構
-- [ ] 建立任務（輸入自然語言 → 送出）
-- [ ] 即時進度顯示（WebSocket）
-- [ ] Dataset Preview（圖片 + bbox 可視化）
-- [ ] DQS 雷達圖（各維度分數）
-- [ ] Active Learning 收斂曲線圖
+- [x] Vue 3 + Vite + TypeScript + Pinia 架構
+- [x] Dashboard（dataset 列表 + 統計卡）
+- [x] 建立任務（自然語言輸入 + example chips）
+- [x] Dataset Detail（info + pipeline status）
+- [x] DQS 雷達圖（Chart.js Radar，5 維度）
+- [x] DQS 各維度進度條
+- [x] Pipeline 步驟視覺化（done/active/pending）
+- [x] Docker Compose frontend service（node:20-alpine）
+- [ ] WebSocket 即時進度（V0.9 補充）
 
 ### Deliverables
 
