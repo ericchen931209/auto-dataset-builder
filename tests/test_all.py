@@ -3,6 +3,7 @@ ADB Test Suite — runs without Docker or GPU.
 Tests core logic modules: deduplicator, cleaner, DQS features, Neural DQS.
 """
 import sys, os, tempfile, math
+from pathlib import Path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "backend"))
 
@@ -476,6 +477,127 @@ def test_convergence_summary_fields():
     assert len(s["history"]) == 2
 
 
+# ─── Test: Exporter ──────────────────────────────────────────────────────────
+
+def test_export_yolo_structure():
+    """export_yolo creates images/labels split dirs and dataset.yaml."""
+    from backend.app.services.exporter import export_yolo
+    with tempfile.TemporaryDirectory() as imgd, \
+         tempfile.TemporaryDirectory() as lbld, \
+         tempfile.TemporaryDirectory() as outd:
+        for i in range(5):
+            make_image(f"{imgd}/{i}.jpg", noise=True)
+            make_label(f"{lbld}/{i}.txt")
+        manifest = export_yolo(imgd, lbld, outd, "TestDS", ["motorcycle"], "v1.0",
+                                train=0.6, val=0.2)
+        out = Path(outd)
+        assert (out / "dataset.yaml").exists()
+        assert (out / "images" / "train").is_dir()
+        assert (out / "images" / "val").is_dir()
+        assert (out / "images" / "test").is_dir()
+        assert manifest.num_images == 5
+        assert manifest.export_format == "yolo"
+        assert len(manifest.checksum) == 64   # sha256 hex
+
+def test_export_yolo_split_sum():
+    """train+val+test image counts sum to total."""
+    from backend.app.services.exporter import export_yolo
+    with tempfile.TemporaryDirectory() as imgd, \
+         tempfile.TemporaryDirectory() as lbld, \
+         tempfile.TemporaryDirectory() as outd:
+        for i in range(10):
+            make_image(f"{imgd}/{i}.jpg", noise=True)
+        manifest = export_yolo(imgd, lbld, outd, "TestDS", ["car"], "v1.0",
+                                train=0.7, val=0.2)
+        assert sum(manifest.split.values()) == 10
+
+def test_export_coco_json():
+    """export_coco creates annotations.json with correct COCO structure."""
+    from backend.app.services.exporter import export_coco
+    with tempfile.TemporaryDirectory() as imgd, \
+         tempfile.TemporaryDirectory() as lbld, \
+         tempfile.TemporaryDirectory() as outd:
+        make_image(f"{imgd}/a.jpg", noise=True)
+        make_label(f"{lbld}/a.txt", cx=0.5, cy=0.5, w=0.3, h=0.2, cls=0)
+        manifest = export_coco(imgd, lbld, outd, "TestDS", ["motorcycle"], "v1.0")
+        import json
+        ann = json.loads((Path(outd) / "annotations.json").read_text())
+        assert "images" in ann and "annotations" in ann and "categories" in ann
+        assert ann["categories"][0]["name"] == "motorcycle"
+        assert manifest.num_annotations == 1
+
+def test_export_coco_bbox_format():
+    """COCO annotations use [x, y, w, h] pixel format (not normalized)."""
+    from backend.app.services.exporter import export_coco
+    import json
+    with tempfile.TemporaryDirectory() as imgd, \
+         tempfile.TemporaryDirectory() as lbld, \
+         tempfile.TemporaryDirectory() as outd:
+        make_image(f"{imgd}/a.jpg", w=100, h=100)
+        # YOLO: cx=0.5 cy=0.5 w=0.5 h=0.5 → COCO: x=25 y=25 w=50 h=50
+        with open(f"{lbld}/a.txt", "w") as f:
+            f.write("0 0.5 0.5 0.5 0.5\n")
+        export_coco(imgd, lbld, outd, "TestDS", ["obj"], "v1.0")
+        ann = json.loads((Path(outd) / "annotations.json").read_text())
+        bbox = ann["annotations"][0]["bbox"]
+        assert abs(bbox[0] - 25) < 1   # x
+        assert abs(bbox[1] - 25) < 1   # y
+        assert abs(bbox[2] - 50) < 1   # w
+        assert abs(bbox[3] - 50) < 1   # h
+
+
+# ─── Test: Version Control ────────────────────────────────────────────────────
+
+def test_create_snapshot_produces_zip():
+    """create_snapshot writes a zip and returns checksum + image count."""
+    from backend.app.services.version_control import create_snapshot
+    with tempfile.TemporaryDirectory() as imgd, \
+         tempfile.TemporaryDirectory() as lbld, \
+         tempfile.TemporaryDirectory() as snpd:
+        for i in range(3):
+            make_image(f"{imgd}/{i}.jpg", noise=True)
+            make_label(f"{lbld}/{i}.txt")
+        result = create_snapshot(1, "v1.0", imgd, lbld, snpd)
+        assert result["total_images"] == 3
+        assert len(result["checksum"]) == 64
+        assert result["snapshot_path"].endswith(".zip")
+        assert Path(result["snapshot_path"]).exists()
+
+def test_diff_versions_added_removed():
+    """diff_versions detects added and removed images between snapshots."""
+    import shutil as _shutil
+    from backend.app.services.version_control import create_snapshot, diff_versions
+    with tempfile.TemporaryDirectory() as imgd1, \
+         tempfile.TemporaryDirectory() as imgd2, \
+         tempfile.TemporaryDirectory() as lbld, \
+         tempfile.TemporaryDirectory() as snpd:
+        make_image(f"{imgd1}/a.jpg", noise=True)
+        make_image(f"{imgd1}/b.jpg", noise=True)
+        _shutil.copy(f"{imgd1}/a.jpg", f"{imgd2}/a.jpg")  # same bytes → unchanged
+        make_image(f"{imgd2}/c.jpg", noise=True)           # c added, b removed
+        snap1 = create_snapshot(1, "v1.0", imgd1, lbld, snpd)
+        snap2 = create_snapshot(1, "v1.1", imgd2, lbld, snpd)
+        diff = diff_versions(snap1["snapshot_path"], snap2["snapshot_path"],
+                             "v1.0", "v1.1")
+        assert "c.jpg" in diff.added
+        assert "b.jpg" in diff.removed
+        assert diff.unchanged >= 1   # a.jpg present in both
+
+def test_diff_versions_identical():
+    """diff_versions reports zero added/removed for identical snapshots."""
+    from backend.app.services.version_control import create_snapshot, diff_versions
+    with tempfile.TemporaryDirectory() as imgd, \
+         tempfile.TemporaryDirectory() as lbld, \
+         tempfile.TemporaryDirectory() as snpd:
+        make_image(f"{imgd}/a.jpg", noise=True)
+        snap = create_snapshot(1, "v1.0", imgd, lbld, snpd)
+        snap2 = create_snapshot(1, "v1.1", imgd, lbld, snpd)
+        diff = diff_versions(snap["snapshot_path"], snap2["snapshot_path"], "v1.0", "v1.1")
+        assert diff.added == []
+        assert diff.removed == []
+        assert diff.unchanged == 1
+
+
 # ─── Run all ──────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
@@ -523,6 +645,13 @@ if __name__ == "__main__":
     test("AL Convergence: stops when stalled",     test_convergence_stops_stalled)
     test("AL Convergence: continues improving",    test_convergence_continues_when_improving)
     test("AL Convergence: summary fields",         test_convergence_summary_fields)
+    test("Export YOLO: directory structure",       test_export_yolo_structure)
+    test("Export YOLO: split counts sum",          test_export_yolo_split_sum)
+    test("Export COCO: json structure",            test_export_coco_json)
+    test("Export COCO: bbox pixel format",         test_export_coco_bbox_format)
+    test("VersionCtrl: snapshot produces zip",     test_create_snapshot_produces_zip)
+    test("VersionCtrl: diff added/removed",        test_diff_versions_added_removed)
+    test("VersionCtrl: diff identical",            test_diff_versions_identical)
 
     print()
     passed = sum(1 for _, ok, _ in results if ok)

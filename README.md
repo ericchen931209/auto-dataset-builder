@@ -197,6 +197,7 @@ auto-dataset-builder/
 | V0.6 | ✅ Done | Neural DQS (5-feature MLP + SHAP explainability) |
 | V0.7 | ✅ Done | Active learning loop (uncertainty sampling + DQS convergence) |
 | V0.8 | ✅ Done | Web dashboard (Vue 3 + Chart.js radar chart) |
+| V0.9 | ✅ Done | Version control + YOLO/COCO export + download API |
 | V1.0 | 📋 Planned | Full release + paper submission |
 
 ---
@@ -240,7 +241,7 @@ Or use the [CITATION.cff](CITATION.cff) file directly — GitHub will render a "
 
 ```bash
 python3 tests/test_all.py
-# Results: 40 passed, 0 failed / 40 total ✓
+# Results: 47 passed, 0 failed / 47 total ✓
 ```
 
 CI runs automatically on every push via GitHub Actions.

@@ -243,18 +243,22 @@ frontend/
 
 ---
 
-## V0.9 — Version Control + Multi-format Export
+## V0.9 — Version Control + Multi-format Export ✅ DONE (2026-06-09)
 
 **目標**：資料集版本管理與輸出。
 
 ### Issues / Tasks
 
-- [ ] Dataset snapshot（壓縮 + hash 記錄）
-- [ ] Version diff（新增/刪除了哪些樣本）
-- [ ] YOLO format export
-- [ ] COCO JSON export
-- [ ] dataset.yaml 自動生成
-- [ ] Download API（zip 打包）
+- [x] Dataset snapshot（zip 壓縮 + SHA-256 checksum + manifest.json）
+- [x] Version diff（比較兩個 snapshot 的 added/removed/unchanged）
+- [x] YOLO format export（train/val/test split + dataset.yaml）
+- [x] COCO JSON export（annotations.json，COCO 格式 bbox）
+- [x] Download API（`GET /datasets/{id}/download` 串流 zip）
+- [x] Export API（`POST /datasets/{id}/export?fmt=yolo|coco`）
+- [x] Version list API（`GET /datasets/{id}/versions`）
+- [x] Version create API（`POST /datasets/{id}/versions`）
+- [x] Version diff API（`GET /datasets/{id}/versions/diff?from_tag=&to_tag=`）
+- [x] 7 個單元測試（exporter + version_control）
 
 ### Deliverables
 
@@ -262,8 +266,9 @@ frontend/
 backend/
   app/
     services/
-      version_control.py
-      exporter.py
+      exporter.py           (YOLO + COCO + zip)
+      version_control.py    (snapshot + diff)
+    api/v1/datasets.py      (5 new endpoints)
 ```
 
 ---
