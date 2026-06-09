@@ -229,7 +229,7 @@ Output: High-quality dataset D*
 - Average training time per variant: ~70 seconds
 - Total benchmark collection time: ~1.9 hours
 
-> Note: 15-epoch training yields mAP@0.5 ≈ 0.59 (baseline). Full convergence (~100 epochs) yields ~0.75–0.80. We use 15 epochs to maximize experimental throughput while preserving relative quality ordering (CV r=0.929 confirms the correlation holds). A 50-epoch verification experiment is planned to validate convergence robustness.
+> **Epoch robustness**: We ran two benchmarks — 15 epochs (throughput-optimized) and 50 epochs (convergence-validated). CV Pearson r differs by only 0.007 (0.929 vs 0.922), confirming that the DQS correlation is robust to training duration. All headline numbers use the 15-epoch benchmark (n=96); 50-epoch results are reported in Section 6.3 for comparison.
 
 **Hardware**: Intel Core Ultra 9 285H (16 cores, no discrete GPU)
 
@@ -249,8 +249,14 @@ Output: High-quality dataset D*
 #### Neural DQS Correlation（fully verified）
 
 See Section 6.3 for full results. Summary:
-- CV Pearson r = **0.929** (n=96, p<0.001)
-- Ablation: removing CLIP Diversity drops r by 0.250 (to 0.679)
+
+| Setting | CV Pearson r | CV R² | mAP range |
+|---------|-------------|-------|-----------|
+| **15 epochs** (main) | **0.929** | 0.854 | 0.030–0.592 |
+| 50 epochs (verification) | 0.922 | 0.846 | 0.040–0.673 |
+
+Δr = 0.007 — correlation is **epoch-invariant**. Both exceed r=0.90.
+Ablation: removing CLIP Diversity drops r by 0.250 (to 0.679).
 
 #### ADB System Comparison（Table 1 — TODO: Taiwan motorcycle data needed）
 
