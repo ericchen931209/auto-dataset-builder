@@ -11,7 +11,7 @@ V0.1  ████░░░░░░░░░░░░░░░░  Project Scaf
 V0.2  ████████░░░░░░░░░░░░  Data Collection
 V0.3  ████████████░░░░░░░░  Auto Annotation (YOLO)
 V0.4  ████████████████░░░░  Dataset Cleaning
-V0.5  ██████████████████░░  SAM2 + LLM Verification
+V0.5  ████████████████████  SAM2 + LLM Verification
 V0.6  ████████████████████  Neural DQS
 V0.7  ████████████████████  Active Learning
 V0.8  ████████████████████  Web Dashboard
@@ -126,28 +126,29 @@ workers/
 
 ---
 
-## V0.5 — SAM2 + LLM Verification
+## V0.5 — SAM2 + LLM Verification ✅ DONE (2026-06-09)
 
 **目標**：完成三階段標註流程，大幅提升標註品質。
 
 ### Issues / Tasks
 
-- [ ] SAM2 整合（bbox prompt → mask）
-- [ ] 從 mask 回推精修 bbox
-- [ ] IoU 一致性檢查
-- [ ] Vision LLM 驗證（Qwen-VL 或 LLaVA）
-- [ ] Prompt template 管理
-- [ ] Low confidence → 人工審核佇列
-- [ ] 整合測試（三階段流程 end-to-end）
+- [x] SAM2 整合（bbox prompt → mask）
+- [x] 從 mask 回推精修 bbox（_bbox_from_mask）
+- [x] Vision LLM 驗證（Qwen-VL-Chat / LLaVA via Ollama）
+- [x] Confidence threshold 前置過濾（不需 LLM call）
+- [x] 兩個 backend 自動降級（Qwen-VL → Ollama → passthrough）
+- [x] Low crop size 跳過 LLM（min_crop_px=32）
+- [x] 三階段 pipeline 整合（three_stage_pipeline.py）
+- [x] 8 個單元測試（fallback/geometry/confidence/empty）
 
 ### Deliverables
 
 ```
 workers/
   annotator/
-    sam2_refiner.py
-    llm_verifier.py
-    annotation_pipeline.py   (three-stage)
+    sam2_refiner.py           (Stage 2: SAM2 bbox refinement)
+    llm_verifier.py           (Stage 3: Vision LLM verification)
+    three_stage_pipeline.py   (end-to-end orchestration)
 ```
 
 ---

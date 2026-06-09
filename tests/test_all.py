@@ -255,6 +255,104 @@ def test_dataset_create_schema_requires_query():
     except Exception:
         pass  # expected
 
+# ─── Test: SAM2 Refiner (fallback path, no GPU needed) ───────────────────────
+
+def test_sam2_refiner_fallback_no_boxes():
+    """refine_with_sam2 with empty boxes returns RefinedAnnotation with empty boxes."""
+    from workers.annotator.yolo_annotator import AnnotationResult
+    from workers.annotator.sam2_refiner import refine_with_sam2
+    results = refine_with_sam2([
+        AnnotationResult(image_path="/nonexistent/img.jpg", boxes=[], success=True)
+    ])
+    assert len(results) == 1
+    assert results[0].boxes == []
+
+def test_sam2_refiner_fallback_missing_sam2():
+    """refine_with_sam2 gracefully falls back when SAM2 is not installed."""
+    from workers.annotator.yolo_annotator import AnnotationResult, BoundingBox
+    from workers.annotator.sam2_refiner import refine_with_sam2
+    box = BoundingBox(0, "car", 0.5, 0.5, 0.3, 0.2, 0.9)
+    ann = AnnotationResult(image_path="/nonexistent/img.jpg", boxes=[box])
+    results = refine_with_sam2([ann])
+    assert len(results) == 1
+    # SAM2 not installed → fallback=True, original box preserved
+    assert results[0].fallback is True
+    assert len(results[0].boxes) == 1
+    assert results[0].boxes[0].class_name == "car"
+
+def test_bbox_from_mask():
+    """_bbox_from_mask converts a binary mask to correct normalized bbox."""
+    from workers.annotator.sam2_refiner import _bbox_from_mask, BoundingBox
+    import numpy as np
+    # 100×100 image, mask covers rows 20-79, cols 10-89
+    mask = np.zeros((100, 100), dtype=bool)
+    mask[20:80, 10:90] = True
+    original = BoundingBox(0, "test", 0.5, 0.5, 0.3, 0.3, 0.9)
+    refined = _bbox_from_mask(mask, original, img_h=100, img_w=100)
+    assert abs(refined.x_center - 0.495) < 0.01    # (10+89)/2 / 100 = 49.5/100
+    assert abs(refined.y_center - 0.495) < 0.01    # (20+79)/2 / 100 = 49.5/100
+    assert abs(refined.width  - 0.79) < 0.01       # (89-10)/100  (slice [10:90] → max col=89)
+    assert abs(refined.height - 0.59) < 0.01       # (79-20)/100  (slice [20:80] → max row=79)
+
+
+# ─── Test: LLM Verifier (fallback path, no GPU needed) ───────────────────────
+
+def test_llm_verifier_passthrough_no_backend():
+    """verify_with_llm passes all boxes through when no LLM is available."""
+    from workers.annotator.yolo_annotator import BoundingBox
+    from workers.annotator.sam2_refiner import RefinedAnnotation
+    from workers.annotator.llm_verifier import verify_with_llm
+    box = BoundingBox(0, "motorcycle", 0.5, 0.5, 0.3, 0.2, 0.8)
+    refined = RefinedAnnotation(image_path="/nonexistent.jpg", boxes=[box], fallback=True)
+    # No real server → should fall back to passthrough
+    results = verify_with_llm([refined], ollama_url="http://localhost:1", ollama_model="llava")
+    assert len(results) == 1
+    assert results[0].backend == "passthrough"
+    assert len(results[0].boxes) == 1
+
+def test_llm_verifier_confidence_filter():
+    """Boxes below confidence_threshold are rejected before LLM call."""
+    from workers.annotator.yolo_annotator import BoundingBox
+    from workers.annotator.sam2_refiner import RefinedAnnotation
+    from workers.annotator.llm_verifier import verify_with_llm
+    low_conf  = BoundingBox(0, "cat", 0.5, 0.5, 0.3, 0.2, confidence=0.30)
+    high_conf = BoundingBox(0, "cat", 0.5, 0.5, 0.3, 0.2, confidence=0.90)
+    refined = RefinedAnnotation(image_path="/nonexistent.jpg", boxes=[low_conf, high_conf], fallback=True)
+    results = verify_with_llm([refined], confidence_threshold=0.5,
+                               ollama_url="http://localhost:1", ollama_model="llava")
+    assert results[0].rejected_count >= 1   # low_conf rejected
+    assert any(b.confidence >= 0.5 for b in results[0].boxes)
+
+def test_llm_verifier_empty_input():
+    """verify_with_llm handles empty box list without error."""
+    from workers.annotator.sam2_refiner import RefinedAnnotation
+    from workers.annotator.llm_verifier import verify_with_llm
+    refined = RefinedAnnotation(image_path="/nonexistent.jpg", boxes=[], fallback=True)
+    results = verify_with_llm([refined], ollama_url="http://localhost:1", ollama_model="llava")
+    assert results[0].boxes == []
+
+
+# ─── Test: Three-stage pipeline (no GPU, no images) ─────────────────────────
+
+def test_pipeline_empty_input():
+    """run_three_stage_pipeline returns empty summary for empty image list."""
+    from workers.annotator.three_stage_pipeline import run_three_stage_pipeline
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        summary = run_three_stage_pipeline([], labels_dir=d)
+    assert summary.total_images == 0
+    assert summary.total_boxes == 0
+
+def test_pipeline_summary_fields():
+    """PipelineSummary has all required fields."""
+    from workers.annotator.three_stage_pipeline import PipelineSummary
+    s = PipelineSummary(total_images=5, total_boxes=10, sam2_refined=3, llm_rejected=1)
+    assert s.total_images == 5
+    assert s.sam2_refined == 3
+    assert s.llm_rejected == 1
+    assert isinstance(s.results, list)
+
+
 # ─── Run all ──────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
@@ -283,6 +381,14 @@ if __name__ == "__main__":
     test("Extractor: fixed-rate from video",       test_frame_extractor_fixed_rate)
     test("Schema: DatasetCreate valid",            test_dataset_create_schema)
     test("Schema: DatasetCreate requires query",   test_dataset_create_schema_requires_query)
+    test("SAM2: fallback on empty boxes",          test_sam2_refiner_fallback_no_boxes)
+    test("SAM2: fallback when SAM2 not installed", test_sam2_refiner_fallback_missing_sam2)
+    test("SAM2: _bbox_from_mask geometry",         test_bbox_from_mask)
+    test("LLM: passthrough when no backend",       test_llm_verifier_passthrough_no_backend)
+    test("LLM: confidence filter pre-LLM",        test_llm_verifier_confidence_filter)
+    test("LLM: empty box list handled",            test_llm_verifier_empty_input)
+    test("Pipeline: empty input → empty summary",  test_pipeline_empty_input)
+    test("Pipeline: summary fields correct",       test_pipeline_summary_fields)
 
     print()
     passed = sum(1 for _, ok, _ in results if ok)

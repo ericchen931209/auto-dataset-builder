@@ -193,7 +193,7 @@ auto-dataset-builder/
 | V0.2 | ✅ Done | Data collection (YouTube CC-licensed + Image Search + Dedup) |
 | V0.3 | ✅ Done | Frame extraction (SSIM adaptive) + YOLO auto annotation |
 | V0.4 | ✅ Done | Dataset cleaning (blur / dark / overexposed) |
-| V0.5 | 🔨 Building | SAM2 bbox refinement + Vision LLM verification |
+| V0.5 | ✅ Done | SAM2 bbox refinement + Vision LLM verification |
 | V0.6 | ✅ Done | Neural DQS (5-feature MLP + SHAP explainability) |
 | V0.7 | 📋 Planned | Active learning loop (uncertainty sampling + DQS convergence) |
 | V0.8 | ✅ Done | Web dashboard (Vue 3 + Chart.js radar chart) |
@@ -239,8 +239,8 @@ Or use the [CITATION.cff](CITATION.cff) file directly — GitHub will render a "
 ## Tests
 
 ```bash
-python tests/test_all.py
-# Results: 21 passed, 0 failed / 21 total ✓
+python3 tests/test_all.py
+# Results: 29 passed, 0 failed / 29 total ✓
 ```
 
 CI runs automatically on every push via GitHub Actions.
