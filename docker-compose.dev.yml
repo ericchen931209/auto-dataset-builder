@@ -1,0 +1,83 @@
+version: "3.9"
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: adb_user
+      POSTGRES_PASSWORD: adb_password
+      POSTGRES_DB: adb_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U adb_user -d adb_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - POSTGRES_HOST=db
+      - POSTGRES_USER=adb_user
+      - POSTGRES_PASSWORD=adb_password
+      - POSTGRES_DB=adb_db
+      - REDIS_URL=redis://redis:6379/0
+      - DATASET_STORAGE_PATH=/app/datasets
+    volumes:
+      - ./backend:/app
+      - dataset_storage:/app/datasets
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: celery -A workers.celery_app worker --loglevel=info --concurrency=2
+    environment:
+      - POSTGRES_HOST=db
+      - POSTGRES_USER=adb_user
+      - POSTGRES_PASSWORD=adb_password
+      - POSTGRES_DB=adb_db
+      - REDIS_URL=redis://redis:6379/0
+      - DATASET_STORAGE_PATH=/app/datasets
+    volumes:
+      - ./backend:/app
+      - dataset_storage:/app/datasets
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  flower:
+    image: mher/flower:2.0
+    command: celery --broker=redis://redis:6379/0 flower --port=5555
+    ports:
+      - "5555:5555"
+    depends_on:
+      - redis
+
+volumes:
+  postgres_data:
+  dataset_storage:

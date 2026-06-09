@@ -1,0 +1,44 @@
+# Web framework
+fastapi==0.115.5
+uvicorn[standard]==0.32.1
+python-multipart==0.0.18
+
+# Settings & validation
+pydantic==2.10.3
+pydantic-settings==2.6.1
+python-dotenv==1.0.1
+
+# Database
+sqlalchemy==2.0.36
+psycopg2-binary==2.9.10
+alembic==1.14.0
+
+# Task queue
+celery[redis]==5.4.0
+redis==5.2.1
+
+# HTTP client
+httpx==0.28.1
+
+# --- V0.2: Data Collection ---
+yt-dlp==2024.12.6
+imagehash==4.3.1
+Pillow==11.0.0
+
+# --- V0.3: Frame Extraction + YOLO ---
+opencv-python-headless==4.10.0.84
+ultralytics==8.3.52     # YOLOv11
+
+# --- V0.4: Cleaning ---
+# (uses opencv, already above)
+
+# --- V0.5: SAM2 + LLM ---
+# sam2 installed separately (see docker/Dockerfile)
+# transformers==4.47.1
+# torch installed in GPU image
+
+# --- V0.6: Neural DQS ---
+numpy==2.2.0
+scikit-learn==1.5.2
+shap==0.46.0
+# open-clip-torch installed separately
