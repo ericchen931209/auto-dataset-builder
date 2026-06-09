@@ -10,7 +10,7 @@ abstract: >
   dataset-level features.
 authors:
   - family-names: "Chen"
-    given-names: "Wei"
+    given-names: "Yu-Wei"
     email: chenchen931209@gmail.com
 repository-code: "https://github.com/ericchen931209/auto-dataset-builder"
 license: MIT

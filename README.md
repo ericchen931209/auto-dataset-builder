@@ -224,7 +224,7 @@ If you use ADB in your research, please cite:
 
 ```bibtex
 @software{chen2026adb,
-  author  = {Chen, Wei},
+  author  = {Chen, Yu-Wei},
   title   = {Auto Dataset Builder: An LLM-Assisted Framework for
              Automatic Dataset Construction},
   year    = {2026},
