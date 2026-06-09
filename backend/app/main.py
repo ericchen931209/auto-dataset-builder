@@ -2,12 +2,12 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.api.v1.router import api_router
 from app.core.config import get_settings
-from app.db.base import Base, engine
+from app.db.base import Base, get_engine
 
 settings = get_settings()
 
 # Create tables on startup (use Alembic migrations in production)
-Base.metadata.create_all(bind=engine)
+Base.metadata.create_all(bind=get_engine())
 
 app = FastAPI(
     title="Auto Dataset Builder",
