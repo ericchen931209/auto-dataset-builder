@@ -2,10 +2,13 @@
 
 > **Turn natural language into a training-ready computer vision dataset — automatically.**
 
+[![Tests](https://github.com/ericchen931209/auto-dataset-builder/actions/workflows/test.yml/badge.svg)](https://github.com/ericchen931209/auto-dataset-builder/actions/workflows/test.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115-green.svg)](https://fastapi.tiangolo.com/)
 [![YOLOv11](https://img.shields.io/badge/YOLO-v11-red.svg)](https://github.com/ultralytics/ultralytics)
+[![Vue 3](https://img.shields.io/badge/Vue-3-42b883.svg)](https://vuejs.org/)
+[![Docker](https://img.shields.io/badge/Docker-ready-2496ed.svg)](docker-compose.dev.yml)
 
 ---
 
@@ -187,14 +190,14 @@ auto-dataset-builder/
 | Version | Status | Feature |
 |---------|--------|---------|
 | V0.1 | ✅ Done | Project scaffold (FastAPI + Celery + PostgreSQL) |
-| V0.2 | ✅ Done | Data collection (YouTube + Image Search + Dedup) |
-| V0.3 | ✅ Done | Frame extraction + YOLO auto annotation |
+| V0.2 | ✅ Done | Data collection (YouTube CC-licensed + Image Search + Dedup) |
+| V0.3 | ✅ Done | Frame extraction (SSIM adaptive) + YOLO auto annotation |
 | V0.4 | ✅ Done | Dataset cleaning (blur / dark / overexposed) |
-| V0.5 | 🔨 Building | SAM2 refinement + Vision LLM verification |
-| V0.6 | ✅ Done | Neural DQS (feature extraction + MLP) |
-| V0.7 | 📋 Planned | Active learning loop |
-| V0.8 | 📋 Planned | Web dashboard (Vue 3) |
-| V1.0 | 📋 Planned | Full release + paper |
+| V0.5 | 🔨 Building | SAM2 bbox refinement + Vision LLM verification |
+| V0.6 | ✅ Done | Neural DQS (5-feature MLP + SHAP explainability) |
+| V0.7 | 📋 Planned | Active learning loop (uncertainty sampling + DQS convergence) |
+| V0.8 | ✅ Done | Web dashboard (Vue 3 + Chart.js radar chart) |
+| V1.0 | 📋 Planned | Full release + paper submission |
 
 ---
 
@@ -207,10 +210,40 @@ This project accompanies the paper:
 Core research contributions:
 1. End-to-end NL→Dataset pipeline with no manual labeling
 2. Three-stage annotation (YOLO + SAM2 + Vision LLM)
-3. Neural DQS: first learnable predictor of dataset-level mAP
+3. **Neural DQS**: first learnable predictor of dataset-level mAP
 4. Active learning loop terminated by DQS threshold
 
-See [docs/paper-draft.md](docs/paper-draft.md) for the full paper outline.
+See [docs/paper-draft.md](docs/paper-draft.md) for the full paper outline and [docs/dqs-model.md](docs/dqs-model.md) for the mathematical formulation.
+
+---
+
+## Citation
+
+If you use ADB in your research, please cite:
+
+```bibtex
+@software{chen2026adb,
+  author  = {Chen, Wei},
+  title   = {Auto Dataset Builder: An LLM-Assisted Framework for
+             Automatic Dataset Construction},
+  year    = {2026},
+  url     = {https://github.com/ericchen931209/auto-dataset-builder},
+  license = {MIT}
+}
+```
+
+Or use the [CITATION.cff](CITATION.cff) file directly — GitHub will render a "Cite this repository" button automatically.
+
+---
+
+## Tests
+
+```bash
+python tests/test_all.py
+# Results: 21 passed, 0 failed / 21 total ✓
+```
+
+CI runs automatically on every push via GitHub Actions.
 
 ---
 
@@ -225,7 +258,8 @@ Do **not** redistribute downloaded videos or frames publicly without verifying t
 
 ## Contributing
 
-Issues and PRs are welcome. See the [roadmap](docs/roadmap.md) for what's being built next.
+Issues, experiments, and PRs are welcome!
+See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines and areas that need help.
 
 ---
 

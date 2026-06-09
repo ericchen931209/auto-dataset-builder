@@ -1,0 +1,29 @@
+cff-version: 1.2.0
+message: "If you use Auto Dataset Builder in your research, please cite it as below."
+type: software
+title: "Auto Dataset Builder: An LLM-Assisted Framework for Automatic Dataset Construction"
+abstract: >
+  Auto Dataset Builder (ADB) is an end-to-end platform that transforms natural language
+  descriptions into annotated, training-ready computer vision datasets. It integrates
+  a three-stage annotation pipeline (YOLOv11, SAM2, Vision LLM) with a novel Neural
+  Dataset Quality Score (Neural DQS) that predicts model mAP from five interpretable
+  dataset-level features.
+authors:
+  - family-names: "Chen"
+    given-names: "Wei"
+    email: chenchen931209@gmail.com
+repository-code: "https://github.com/ericchen931209/auto-dataset-builder"
+license: MIT
+version: "0.8.0"
+date-released: "2026-06-09"
+keywords:
+  - dataset
+  - computer vision
+  - auto labeling
+  - YOLO
+  - SAM2
+  - large language models
+  - dataset quality
+  - active learning
+  - machine learning
+  - deep learning
