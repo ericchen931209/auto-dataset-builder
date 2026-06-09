@@ -9,6 +9,8 @@
 [![YOLOv11](https://img.shields.io/badge/YOLO-v11-red.svg)](https://github.com/ultralytics/ultralytics)
 [![Vue 3](https://img.shields.io/badge/Vue-3-42b883.svg)](https://vuejs.org/)
 [![Docker](https://img.shields.io/badge/Docker-ready-2496ed.svg)](docker-compose.dev.yml)
+[![HF Dataset](https://img.shields.io/badge/🤗%20Dataset-neural--dqs--benchmark-orange)](https://huggingface.co/datasets/EricChenWei/neural-dqs-benchmark)
+[![HF Model](https://img.shields.io/badge/🤗%20Model-neural--dqs-orange)](https://huggingface.co/EricChenWei/neural-dqs)
 
 ---
 
