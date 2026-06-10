@@ -47,4 +47,9 @@ open-clip-torch==2.29.0
 # --- V0.7: Open-Vocabulary Stage 1 (YOLO-World) ---
 # Text encoder for YOLO-World's set_classes(); not on PyPI, installed from
 # Ultralytics' maintained CLIP fork.
+# SECURITY NOTE: this is a `pip install git+https://...` dependency — pip
+# fetches and executes this repo's setup code at install time. It is not a
+# versioned PyPI release, so a future push to that repo's default branch
+# could change what gets installed. Review the repo before installing in any
+# CI/production environment, or pin to a specific commit hash.
 git+https://github.com/ultralytics/CLIP.git
