@@ -35,6 +35,7 @@ data/motorcycle_coco/
 # Internal/private docs (kept locally only)
 /EXPOSURE_PLAN.md
 /docs/paper-draft.md
+/docs/paper-explained-zh.md
 
 # Frontend dependencies
 frontend/node_modules/

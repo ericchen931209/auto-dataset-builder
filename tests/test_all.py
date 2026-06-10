@@ -355,6 +355,95 @@ def test_pipeline_summary_fields():
     assert s.llm_rejected == 1
     assert isinstance(s.results, list)
 
+def test_pipeline_yolo_world_requires_classes():
+    """detector_backend='yolo_world' without open_vocab_classes raises ValueError."""
+    from workers.annotator.three_stage_pipeline import run_three_stage_pipeline
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        try:
+            run_three_stage_pipeline(["/nonexistent.jpg"], labels_dir=d, detector_backend="yolo_world")
+            assert False, "Should have raised ValueError"
+        except ValueError as e:
+            assert "open_vocab_classes" in str(e)
+
+def test_pipeline_unknown_backend():
+    """An unrecognized detector_backend raises ValueError."""
+    from workers.annotator.three_stage_pipeline import run_three_stage_pipeline
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        try:
+            run_three_stage_pipeline(["/nonexistent.jpg"], labels_dir=d, detector_backend="bogus")
+            assert False, "Should have raised ValueError"
+        except ValueError as e:
+            assert "bogus" in str(e)
+
+
+# ─── Test: Open-Vocabulary Detector (YOLO-World, no GPU/network needed) ──────
+
+def test_open_vocab_empty_classes():
+    """run_yolo_world_batch with no class_names returns failure results."""
+    from workers.annotator.open_vocab_detector import run_yolo_world_batch
+    results = run_yolo_world_batch(["/nonexistent.jpg"], class_names=[])
+    assert len(results) == 1
+    assert results[0].success is False
+    assert "class_names" in results[0].error
+
+def test_open_vocab_missing_ultralytics():
+    """run_yolo_world_batch reports failure when ultralytics is not importable."""
+    from unittest.mock import patch
+    import builtins
+    from workers.annotator import open_vocab_detector
+
+    real_import = builtins.__import__
+
+    def fake_import(name, *args, **kwargs):
+        if name == "ultralytics":
+            raise ImportError("no ultralytics")
+        return real_import(name, *args, **kwargs)
+
+    with patch.object(builtins, "__import__", side_effect=fake_import):
+        results = open_vocab_detector.run_yolo_world_batch(
+            ["/nonexistent.jpg"], class_names=["scooter"]
+        )
+    assert len(results) == 1
+    assert results[0].success is False
+    assert "ultralytics" in results[0].error
+
+def test_open_vocab_batch_with_mocked_model():
+    """run_yolo_world_batch maps detections to BoundingBox using the open-vocab class list."""
+    import sys
+    from unittest.mock import MagicMock, patch
+    from workers.annotator import open_vocab_detector
+
+    class_names = ["scooter", "helmet"]
+
+    fake_box = MagicMock()
+    fake_box.cls = [0]
+    fake_box.conf = [0.77]
+    fake_box.xywhn = [MagicMock(tolist=lambda: [0.5, 0.5, 0.2, 0.3])]
+
+    fake_pred = MagicMock()
+    fake_pred.boxes = [fake_box]
+
+    fake_model = MagicMock()
+    fake_model.return_value = [fake_pred]
+
+    fake_yolo_cls = MagicMock(return_value=fake_model)
+    fake_ultralytics = MagicMock(YOLO=fake_yolo_cls)
+
+    with patch.dict(sys.modules, {"ultralytics": fake_ultralytics}):
+        results = open_vocab_detector.run_yolo_world_batch(
+            ["/nonexistent.jpg"], class_names=class_names, model_path="yolov8s-worldv2.pt"
+        )
+
+    fake_model.set_classes.assert_called_once_with(class_names)
+    assert len(results) == 1
+    assert results[0].success is True
+    assert len(results[0].boxes) == 1
+    box = results[0].boxes[0]
+    assert box.class_name == "scooter"
+    assert box.confidence == 0.77
+
 
 # ─── Test: Uncertainty Sampler ───────────────────────────────────────────────
 
@@ -636,6 +725,11 @@ if __name__ == "__main__":
     test("LLM: empty box list handled",            test_llm_verifier_empty_input)
     test("Pipeline: empty input → empty summary",  test_pipeline_empty_input)
     test("Pipeline: summary fields correct",       test_pipeline_summary_fields)
+    test("Pipeline: yolo_world requires classes",   test_pipeline_yolo_world_requires_classes)
+    test("Pipeline: unknown backend raises",        test_pipeline_unknown_backend)
+    test("OpenVocab: empty classes → failure",      test_open_vocab_empty_classes)
+    test("OpenVocab: missing ultralytics handled",  test_open_vocab_missing_ultralytics)
+    test("OpenVocab: mocked model → BoundingBox",   test_open_vocab_batch_with_mocked_model)
     test("AL Sampler: no labels → uncertain",       test_uncertainty_sampler_no_labels)
     test("AL Sampler: high conf excluded",          test_uncertainty_sampler_high_conf_excluded)
     test("AL Sampler: low conf included",           test_uncertainty_sampler_low_conf_included)

@@ -1,9 +1,16 @@
 """
 Three-Stage Annotation Pipeline (V0.5)
 
-  Stage 1 — YOLOv11 proposal    (workers/annotator/yolo_annotator.py)
+  Stage 1 — Proposal generation (workers/annotator/yolo_annotator.py,
+                                  workers/annotator/open_vocab_detector.py)
   Stage 2 — SAM2 refinement     (workers/annotator/sam2_refiner.py)
   Stage 3 — Vision LLM verify   (workers/annotator/llm_verifier.py)
+
+Stage 1 supports two interchangeable detector backends:
+  - "yolo11"     COCO-80 pretrained YOLOv11 (run_yolo_batch)
+  - "yolo_world" open-vocabulary YOLO-World (run_yolo_world_batch),
+                 accepts arbitrary text-prompt class names via
+                 open_vocab_classes.
 
 Each stage degrades gracefully: if a heavy model is unavailable the pipeline
 continues using the previous stage's output unchanged.
@@ -18,6 +25,7 @@ from workers.annotator.yolo_annotator import (
     run_yolo_batch,
     save_yolo_labels,
 )
+from workers.annotator.open_vocab_detector import run_yolo_world_batch
 from workers.annotator.sam2_refiner import refine_with_sam2, RefinedAnnotation
 from workers.annotator.llm_verifier import verify_with_llm, VerifiedAnnotation
 
@@ -51,7 +59,10 @@ def run_three_stage_pipeline(
     image_paths: list[str],
     labels_dir: str,
     # Stage 1 options
+    detector_backend: str = "yolo11",  # "yolo11" | "yolo_world"
     yolo_model: str = "yolov11n.pt",
+    yolo_world_model: str = "yolov8s-worldv2.pt",
+    open_vocab_classes: list[str] | None = None,
     confidence_threshold: float = 0.25,
     target_classes: list[str] | None = None,
     class_map: dict[str, int] | None = None,
@@ -68,18 +79,38 @@ def run_three_stage_pipeline(
 
     Writes YOLO-format .txt label files to labels_dir.
     Returns a PipelineSummary with per-image and aggregate statistics.
+
+    detector_backend selects Stage 1:
+      - "yolo11"     COCO-80 pretrained YOLOv11, filtered by target_classes.
+      - "yolo_world" open-vocabulary YOLO-World, using open_vocab_classes as
+                     the text-prompt vocabulary (required for this backend).
     """
     if not image_paths:
         return PipelineSummary()
 
-    # ── Stage 1: YOLO proposals ───────────────────────────────────────────────
-    logger.info(f"[Stage 1] YOLO inference on {len(image_paths)} images")
-    yolo_results: list[AnnotationResult] = run_yolo_batch(
-        image_paths=image_paths,
-        model_path=yolo_model,
-        confidence_threshold=confidence_threshold,
-        target_classes=target_classes,
-    )
+    # ── Stage 1: detection proposals ──────────────────────────────────────────
+    if detector_backend == "yolo_world":
+        if not open_vocab_classes:
+            raise ValueError("open_vocab_classes is required when detector_backend='yolo_world'")
+        logger.info(f"[Stage 1] YOLO-World (open-vocab) inference on {len(image_paths)} images, "
+                    f"classes={open_vocab_classes}")
+        yolo_results: list[AnnotationResult] = run_yolo_world_batch(
+            image_paths=image_paths,
+            class_names=open_vocab_classes,
+            model_path=yolo_world_model,
+            confidence_threshold=confidence_threshold,
+        )
+    elif detector_backend == "yolo11":
+        logger.info(f"[Stage 1] YOLOv11 (COCO-80) inference on {len(image_paths)} images")
+        yolo_results = run_yolo_batch(
+            image_paths=image_paths,
+            model_path=yolo_model,
+            confidence_threshold=confidence_threshold,
+            target_classes=target_classes,
+        )
+    else:
+        raise ValueError(f"Unknown detector_backend: {detector_backend!r} (expected 'yolo11' or 'yolo_world')")
+
     logger.info(f"[Stage 1] Done — {sum(len(r.boxes) for r in yolo_results)} boxes total")
 
     # ── Stage 2: SAM2 refinement ──────────────────────────────────────────────
