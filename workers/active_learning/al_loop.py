@@ -11,9 +11,7 @@ The loop terminates when the dataset DQS score reaches the target threshold,
 the improvement stalls, or the iteration cap is hit.
 """
 import logging
-import shutil
 from dataclasses import dataclass, field
-from pathlib import Path
 
 from workers.active_learning.uncertainty_sampler import (
     sample_uncertain_images,
@@ -73,24 +71,8 @@ def _evaluate_dqs(images_dir: str, labels_dir: str, model_path: str | None) -> f
         from models.dqs.feature_extractor import extract_features
         from models.dqs.neural_dqs import predict
 
-        image_files = [
-            str(p) for p in Path(images_dir).iterdir()
-            if p.suffix.lower() in {".jpg", ".jpeg", ".png"}
-        ]
-        label_files = [
-            str(Path(labels_dir) / (Path(p).stem + ".txt"))
-            for p in image_files
-        ]
-
-        features = extract_features(image_files, label_files)
-        feature_vec = [
-            features.annotation_quality,
-            features.diversity,
-            features.lighting_diversity,
-            features.pose_diversity,
-            features.class_balance,
-        ]
-        return predict(feature_vec, model_path=model_path)
+        features = extract_features(images_dir, labels_dir)
+        return predict(features.to_vector(), model_path=model_path)
 
     except Exception as e:
         logger.warning(f"DQS evaluation failed ({e}), returning 0.0")

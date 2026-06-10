@@ -28,6 +28,10 @@ models/dqs/checkpoints/*.pt
 datasets/
 /app/datasets/
 
+# Section 6.2 motorcycle dataset + training runs (reproducible via tools/build_motorcycle_dataset.py)
+data/motorcycle_coco/
+/runs/
+
 # Frontend dependencies
 frontend/node_modules/
 

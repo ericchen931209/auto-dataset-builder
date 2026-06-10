@@ -33,12 +33,13 @@ ultralytics==8.3.52     # YOLOv11
 # (uses opencv, already above)
 
 # --- V0.5: SAM2 + LLM ---
-# sam2 installed separately (see docker/Dockerfile)
-# transformers==4.47.1
-# torch installed in GPU image
+sam2==1.1.0
+transformers==4.47.1
+einops==0.8.0
+# torch installed separately (CPU build for non-GPU hosts)
 
 # --- V0.6: Neural DQS ---
 numpy==2.2.0
 scikit-learn==1.5.2
 shap==0.46.0
-# open-clip-torch installed separately
+open-clip-torch==2.29.0

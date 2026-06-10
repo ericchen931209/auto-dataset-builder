@@ -105,7 +105,7 @@ def test_e2e_dqs_pipeline():
         # extract_features takes directory paths, not lists
         feats = extract_features(imgd, lbld)
         assert 0.0 <= feats.annotation_quality <= 1.0
-        assert 0.0 <= feats.diversity <= 1.0
+        assert 0.0 <= feats.clip_diversity <= 1.0
         score = predict(feats.to_vector())
         assert 0.0 <= score <= 1.0
 

@@ -122,8 +122,8 @@ def test_dqs_features_valid_range():
         for name in ["dark", "mid", "bright"]:
             make_label(f"{lbld}/{name}.txt", cx=0.5, cy=0.5, w=0.3, h=0.2)
         feats = extract_features(imgd, lbld)
-        for attr in ["annotation_quality", "diversity", "lighting_diversity",
-                     "pose_diversity", "class_balance"]:
+        for attr in ["annotation_quality", "sharpness", "clip_diversity",
+                     "lighting_diversity", "pose_diversity", "class_balance"]:
             v = getattr(feats, attr)
             assert 0.0 <= v <= 1.0, f"{attr}={v} out of [0,1]"
 
@@ -203,10 +203,10 @@ def test_neural_dqs_train_and_predict():
 
 def test_neural_dqs_feature_vector():
     from models.dqs.feature_extractor import DQSFeatures
-    f = DQSFeatures(0.8, 0.6, 0.7, 0.5, 1.0)
+    f = DQSFeatures(0.8, 0.6, 0.7, 0.5, 1.0, 0.9)
     v = f.to_vector()
-    assert len(v) == 5
-    assert v == [0.8, 0.6, 0.7, 0.5, 1.0]
+    assert len(v) == 6
+    assert v == [0.8, 0.6, 0.7, 0.5, 1.0, 0.9]
     d = f.to_dict()
     assert "annotation_quality" in d
 
@@ -299,14 +299,16 @@ def test_bbox_from_mask():
 # ─── Test: LLM Verifier (fallback path, no GPU needed) ───────────────────────
 
 def test_llm_verifier_passthrough_no_backend():
-    """verify_with_llm passes all boxes through when no LLM is available."""
+    """verify_with_llm passes all boxes through when no LLM backend is available."""
+    from unittest.mock import patch
     from workers.annotator.yolo_annotator import BoundingBox
     from workers.annotator.sam2_refiner import RefinedAnnotation
-    from workers.annotator.llm_verifier import verify_with_llm
+    from workers.annotator import llm_verifier
     box = BoundingBox(0, "motorcycle", 0.5, 0.5, 0.3, 0.2, 0.8)
     refined = RefinedAnnotation(image_path="/nonexistent.jpg", boxes=[box], fallback=True)
-    # No real server → should fall back to passthrough
-    results = verify_with_llm([refined], ollama_url="http://localhost:1", ollama_model="llava")
+    # Force no backend (Qwen-VL/Ollama/CLIP all unavailable) → should fall back to passthrough
+    with patch.object(llm_verifier, "_load_backend", return_value=None):
+        results = llm_verifier.verify_with_llm([refined], ollama_url="http://localhost:1", ollama_model="llava")
     assert len(results) == 1
     assert results[0].backend == "passthrough"
     assert len(results[0].boxes) == 1

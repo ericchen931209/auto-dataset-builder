@@ -139,10 +139,56 @@ class _OllamaBackend:
         return _is_positive(data.get("response", ""))
 
 
+# ─── Backend: CLIP zero-shot ───────────────────────────────────────────────────
+
+class _ClipZeroShotBackend:
+    """
+    CPU-friendly Stage-3 substitute for Qwen-VL/LLaVA: classifies a crop via
+    CLIP zero-shot similarity between the crop and a small set of text prompts
+    ("a photo of a {class_name}" vs. generic distractor prompts). Used when no
+    local Vision-LLM (Qwen-VL, Ollama) is available.
+    """
+
+    _DISTRACTORS = ["a photo of a road", "a photo of a person",
+                    "a photo of a car", "a blurry background image"]
+
+    def __init__(self, threshold: float = 0.0):
+        import open_clip
+        import torch
+
+        self.torch = torch
+        self.model, _, self.preprocess = open_clip.create_model_and_transforms(
+            "ViT-B-32", pretrained="openai"
+        )
+        self.model.eval()
+        self.tokenizer = open_clip.get_tokenizer("ViT-B-32")
+        self.threshold = threshold
+        self.name = "clip-zeroshot"
+
+    def ask(self, class_name: str, crop_b64: str) -> bool:
+        from PIL import Image as PILImage
+
+        img = PILImage.open(io.BytesIO(base64.b64decode(crop_b64))).convert("RGB")
+        image_input = self.preprocess(img).unsqueeze(0)
+
+        prompts = [f"a photo of a {class_name}"] + self._DISTRACTORS
+        text_input = self.tokenizer(prompts)
+
+        with self.torch.no_grad():
+            image_features = self.model.encode_image(image_input)
+            text_features = self.model.encode_text(text_input)
+            image_features /= image_features.norm(dim=-1, keepdim=True)
+            text_features /= text_features.norm(dim=-1, keepdim=True)
+            sims = (image_features @ text_features.T).squeeze(0)
+
+        best_idx = int(sims.argmax())
+        return best_idx == 0
+
+
 # ─── Backend loader ───────────────────────────────────────────────────────────
 
 def _load_backend(ollama_url: str, ollama_model: str):
-    """Try Qwen-VL first, then Ollama, return None if neither available."""
+    """Try Qwen-VL, then Ollama, then CLIP zero-shot; return None if all fail."""
     try:
         return _QwenVLBackend()
     except Exception as e:
@@ -152,6 +198,11 @@ def _load_backend(ollama_url: str, ollama_model: str):
         return _OllamaBackend(base_url=ollama_url, model=ollama_model)
     except Exception as e:
         logger.debug(f"Ollama unavailable: {e}")
+
+    try:
+        return _ClipZeroShotBackend()
+    except Exception as e:
+        logger.debug(f"CLIP zero-shot unavailable: {e}")
 
     return None
 
