@@ -96,7 +96,8 @@ def bench_dqs(imgd: str, lbld: str) -> dict:
         "dqs_score": round(score, 4),
         "features": {
             "annotation_quality": round(feats.annotation_quality, 4),
-            "diversity": round(feats.diversity, 4),
+            "sharpness": round(feats.sharpness, 4),
+            "clip_diversity": round(feats.clip_diversity, 4),
             "lighting_diversity": round(feats.lighting_diversity, 4),
             "pose_diversity": round(feats.pose_diversity, 4),
             "class_balance": round(feats.class_balance, 4),
