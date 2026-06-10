@@ -19,15 +19,15 @@ def run_yolo_world_batch(
     fixed vocabulary. Returns AnnotationResult per image, filtered by
     confidence_threshold.
     """
+    if not class_names:
+        return [AnnotationResult(p, success=False, error="class_names is empty")
+                for p in image_paths]
+
     try:
         from ultralytics import YOLO
     except ImportError:
         logger.error("ultralytics not installed — cannot run YOLO-World annotation")
         return [AnnotationResult(p, success=False, error="ultralytics not installed")
-                for p in image_paths]
-
-    if not class_names:
-        return [AnnotationResult(p, success=False, error="class_names is empty")
                 for p in image_paths]
 
     model = YOLO(model_path)
