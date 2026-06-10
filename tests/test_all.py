@@ -356,7 +356,7 @@ def test_pipeline_summary_fields():
     assert isinstance(s.results, list)
 
 def test_pipeline_yolo_world_requires_classes():
-    """detector_backend='yolo_world' without open_vocab_classes raises ValueError."""
+    """detector_backend='yolo_world' without open_vocab_classes/target_classes raises ValueError."""
     from workers.annotator.three_stage_pipeline import run_three_stage_pipeline
     import tempfile
     with tempfile.TemporaryDirectory() as d:
@@ -365,6 +365,28 @@ def test_pipeline_yolo_world_requires_classes():
             assert False, "Should have raised ValueError"
         except ValueError as e:
             assert "open_vocab_classes" in str(e)
+
+def test_pipeline_auto_uses_target_classes_for_open_vocab():
+    """detector_backend='auto' with a non-COCO class falls back to YOLO-World using target_classes."""
+    import sys, tempfile
+    from unittest.mock import patch
+    from workers.annotator import three_stage_pipeline as pipeline
+    from workers.annotator.yolo_annotator import AnnotationResult
+
+    captured = {}
+
+    def fake_run_yolo_world_batch(image_paths, class_names, **kwargs):
+        captured["class_names"] = class_names
+        return [AnnotationResult(image_path=p, boxes=[], success=True) for p in image_paths]
+
+    with tempfile.TemporaryDirectory() as d:
+        with patch.object(pipeline, "run_yolo_world_batch", side_effect=fake_run_yolo_world_batch):
+            summary = pipeline.run_three_stage_pipeline(
+                ["/nonexistent.jpg"], labels_dir=d, target_classes=["scooter helmet"]
+            )
+
+    assert captured["class_names"] == ["scooter helmet"]
+    assert summary.total_images == 1
 
 def test_pipeline_unknown_backend():
     """An unrecognized detector_backend raises ValueError."""
@@ -376,6 +398,31 @@ def test_pipeline_unknown_backend():
             assert False, "Should have raised ValueError"
         except ValueError as e:
             assert "bogus" in str(e)
+
+
+# ─── Test: Automatic Backend Selection (coco_classes.select_detector_backend) ─
+
+def test_select_backend_empty_classes_uses_yolo11():
+    """No target_classes → yolo11 (existing well-tested COCO-80 path)."""
+    from workers.annotator.coco_classes import select_detector_backend
+    assert select_detector_backend(None) == "yolo11"
+    assert select_detector_backend([]) == "yolo11"
+
+def test_select_backend_coco_classes_uses_yolo11():
+    """All requested classes covered by COCO-80 → yolo11."""
+    from workers.annotator.coco_classes import select_detector_backend
+    assert select_detector_backend(["car", "person"]) == "yolo11"
+    assert select_detector_backend(["Motorcycle"]) == "yolo11"  # case-insensitive
+
+def test_select_backend_non_coco_classes_uses_yolo_world():
+    """A class outside COCO-80 → yolo_world (open-vocabulary)."""
+    from workers.annotator.coco_classes import select_detector_backend
+    assert select_detector_backend(["helmet"]) == "yolo_world"
+
+def test_select_backend_mixed_classes_uses_yolo_world():
+    """Mix of COCO-80 and non-COCO classes → yolo_world (covers all requested classes)."""
+    from workers.annotator.coco_classes import select_detector_backend
+    assert select_detector_backend(["motorcycle", "helmet"]) == "yolo_world"
 
 
 # ─── Test: Open-Vocabulary Detector (YOLO-World, no GPU/network needed) ──────
@@ -726,7 +773,12 @@ if __name__ == "__main__":
     test("Pipeline: empty input → empty summary",  test_pipeline_empty_input)
     test("Pipeline: summary fields correct",       test_pipeline_summary_fields)
     test("Pipeline: yolo_world requires classes",   test_pipeline_yolo_world_requires_classes)
+    test("Pipeline: auto uses target_classes",      test_pipeline_auto_uses_target_classes_for_open_vocab)
     test("Pipeline: unknown backend raises",        test_pipeline_unknown_backend)
+    test("Backend select: empty → yolo11",          test_select_backend_empty_classes_uses_yolo11)
+    test("Backend select: COCO classes → yolo11",   test_select_backend_coco_classes_uses_yolo11)
+    test("Backend select: non-COCO → yolo_world",   test_select_backend_non_coco_classes_uses_yolo_world)
+    test("Backend select: mixed → yolo_world",      test_select_backend_mixed_classes_uses_yolo_world)
     test("OpenVocab: empty classes → failure",      test_open_vocab_empty_classes)
     test("OpenVocab: missing ultralytics handled",  test_open_vocab_missing_ultralytics)
     test("OpenVocab: mocked model → BoundingBox",   test_open_vocab_batch_with_mocked_model)

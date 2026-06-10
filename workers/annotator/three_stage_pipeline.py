@@ -12,6 +12,12 @@ Stage 1 supports two interchangeable detector backends:
                  accepts arbitrary text-prompt class names via
                  open_vocab_classes.
 
+By default (detector_backend="auto"), the backend is chosen automatically
+from target_classes: if every requested class is in COCO-80 the well-tested
+"yolo11" path is used unchanged; otherwise it falls back to "yolo_world"
+using target_classes as the open-vocabulary prompt list. Callers therefore
+get arbitrary-class support "for free" — just pass target_classes as before.
+
 Each stage degrades gracefully: if a heavy model is unavailable the pipeline
 continues using the previous stage's output unchanged.
 """
@@ -26,6 +32,7 @@ from workers.annotator.yolo_annotator import (
     save_yolo_labels,
 )
 from workers.annotator.open_vocab_detector import run_yolo_world_batch
+from workers.annotator.coco_classes import select_detector_backend
 from workers.annotator.sam2_refiner import refine_with_sam2, RefinedAnnotation
 from workers.annotator.llm_verifier import verify_with_llm, VerifiedAnnotation
 
@@ -59,7 +66,7 @@ def run_three_stage_pipeline(
     image_paths: list[str],
     labels_dir: str,
     # Stage 1 options
-    detector_backend: str = "yolo11",  # "yolo11" | "yolo_world"
+    detector_backend: str = "auto",  # "auto" | "yolo11" | "yolo_world"
     yolo_model: str = "yolov11n.pt",
     yolo_world_model: str = "yolov8s-worldv2.pt",
     open_vocab_classes: list[str] | None = None,
@@ -81,17 +88,26 @@ def run_three_stage_pipeline(
     Returns a PipelineSummary with per-image and aggregate statistics.
 
     detector_backend selects Stage 1:
+      - "auto"       (default) pick "yolo11" if target_classes is empty or
+                     fully covered by COCO-80, else "yolo_world".
       - "yolo11"     COCO-80 pretrained YOLOv11, filtered by target_classes.
-      - "yolo_world" open-vocabulary YOLO-World, using open_vocab_classes as
-                     the text-prompt vocabulary (required for this backend).
+      - "yolo_world" open-vocabulary YOLO-World, using open_vocab_classes
+                     (or target_classes if not given) as the text-prompt
+                     vocabulary.
     """
     if not image_paths:
         return PipelineSummary()
 
+    if detector_backend == "auto":
+        detector_backend = select_detector_backend(target_classes)
+        logger.info(f"[Stage 1] detector_backend='auto' -> {detector_backend!r} "
+                    f"(target_classes={target_classes})")
+
     # ── Stage 1: detection proposals ──────────────────────────────────────────
     if detector_backend == "yolo_world":
+        open_vocab_classes = open_vocab_classes or target_classes
         if not open_vocab_classes:
-            raise ValueError("open_vocab_classes is required when detector_backend='yolo_world'")
+            raise ValueError("open_vocab_classes (or target_classes) is required when detector_backend='yolo_world'")
         logger.info(f"[Stage 1] YOLO-World (open-vocab) inference on {len(image_paths)} images, "
                     f"classes={open_vocab_classes}")
         yolo_results: list[AnnotationResult] = run_yolo_world_batch(
@@ -109,7 +125,7 @@ def run_three_stage_pipeline(
             target_classes=target_classes,
         )
     else:
-        raise ValueError(f"Unknown detector_backend: {detector_backend!r} (expected 'yolo11' or 'yolo_world')")
+        raise ValueError(f"Unknown detector_backend: {detector_backend!r} (expected 'auto', 'yolo11', or 'yolo_world')")
 
     logger.info(f"[Stage 1] Done — {sum(len(r.boxes) for r in yolo_results)} boxes total")
 
