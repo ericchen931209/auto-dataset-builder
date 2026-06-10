@@ -43,3 +43,8 @@ numpy==2.2.0
 scikit-learn==1.5.2
 shap==0.46.0
 open-clip-torch==2.29.0
+
+# --- V0.7: Open-Vocabulary Stage 1 (YOLO-World) ---
+# Text encoder for YOLO-World's set_classes(); not on PyPI, installed from
+# Ultralytics' maintained CLIP fork.
+git+https://github.com/ultralytics/CLIP.git
