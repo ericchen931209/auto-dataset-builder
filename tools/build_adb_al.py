@@ -42,10 +42,10 @@ def main():
     for i in range(0, len(paths), 16):
         batch = paths[i:i + 16]
         results = model.predict(batch, conf=0.01, classes=[MOTO_CLASS_IDX], verbose=False, device="cpu")
-        for r in results:
+        for p, r in zip(batch, results):
             confs = [float(b.conf[0]) for b in r.boxes]
             max_conf = max(confs) if confs else 0.0
-            scores.append((r.path, max_conf))
+            scores.append((p, max_conf))
 
     scores.sort(key=lambda x: x[1])  # ascending: most uncertain first
     uncertain = [p for p, c in scores if c < args.conf_threshold][:args.max_select]
