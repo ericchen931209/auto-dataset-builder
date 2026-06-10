@@ -32,6 +32,10 @@ datasets/
 data/motorcycle_coco/
 /runs/
 
+# Internal/private docs (kept locally only)
+/EXPOSURE_PLAN.md
+/docs/paper-draft.md
+
 # Frontend dependencies
 frontend/node_modules/
 
