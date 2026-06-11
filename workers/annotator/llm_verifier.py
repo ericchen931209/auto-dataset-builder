@@ -215,6 +215,7 @@ def verify_with_llm(
     ollama_url: str = "http://localhost:11434",
     ollama_model: str = "llava",
     min_crop_px: int = 32,
+    skip: bool = False,
 ) -> list[VerifiedAnnotation]:
     """
     Verify each annotated bounding box with a Vision LLM.
@@ -231,13 +232,15 @@ def verify_with_llm(
         ollama_url: Ollama server base URL.
         ollama_model: Ollama model tag (e.g. "llava", "bakllava").
         min_crop_px: Skip LLM call if crop is smaller than this in either dimension.
+        skip: If True, skip semantic verification entirely (still applies the
+              confidence_threshold pre-filter) — for ablation studies.
 
     Returns:
         List of VerifiedAnnotation, one per input.
     """
     import cv2
 
-    backend = _load_backend(ollama_url, ollama_model)
+    backend = None if skip else _load_backend(ollama_url, ollama_model)
     backend_name = backend.name if backend else "passthrough"
 
     if backend is None:

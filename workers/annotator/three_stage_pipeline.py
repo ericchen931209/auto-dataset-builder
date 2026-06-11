@@ -76,10 +76,12 @@ def run_three_stage_pipeline(
     # Stage 2 options
     sam2_checkpoint: str = "checkpoints/sam2_hiera_tiny.pt",
     sam2_config: str = "sam2_hiera_t.yaml",
+    skip_sam2: bool = False,
     # Stage 3 options
     llm_confidence_threshold: float = 0.5,
     ollama_url: str = "http://localhost:11434",
     ollama_model: str = "llava",
+    skip_llm_verify: bool = False,
 ) -> PipelineSummary:
     """
     Run the full three-stage annotation pipeline on a list of images.
@@ -94,6 +96,9 @@ def run_three_stage_pipeline(
       - "yolo_world" open-vocabulary YOLO-World, using open_vocab_classes
                      (or target_classes if not given) as the text-prompt
                      vocabulary.
+
+    skip_sam2 / skip_llm_verify disable Stage 2 / Stage 3 respectively
+    (boxes pass through unchanged) — for component-wise ablation studies.
     """
     if not image_paths:
         return PipelineSummary()
@@ -130,11 +135,15 @@ def run_three_stage_pipeline(
     logger.info(f"[Stage 1] Done — {sum(len(r.boxes) for r in yolo_results)} boxes total")
 
     # ── Stage 2: SAM2 refinement ──────────────────────────────────────────────
-    logger.info("[Stage 2] SAM2 bbox refinement")
+    if skip_sam2:
+        logger.info("[Stage 2] SAM2 bbox refinement — SKIPPED (ablation)")
+    else:
+        logger.info("[Stage 2] SAM2 bbox refinement")
     sam2_results: list[RefinedAnnotation] = refine_with_sam2(
         annotation_results=yolo_results,
         checkpoint=sam2_checkpoint,
         config=sam2_config,
+        skip=skip_sam2,
     )
     sam2_total_refined = sum(r.refined_count for r in sam2_results)
     sam2_fallback_count = sum(1 for r in sam2_results if r.fallback)
@@ -142,12 +151,16 @@ def run_three_stage_pipeline(
                 f"({sam2_fallback_count} images used YOLO fallback)")
 
     # ── Stage 3: Vision LLM verification ─────────────────────────────────────
-    logger.info("[Stage 3] Vision LLM label verification")
+    if skip_llm_verify:
+        logger.info("[Stage 3] Vision LLM label verification — SKIPPED (ablation)")
+    else:
+        logger.info("[Stage 3] Vision LLM label verification")
     verified_results: list[VerifiedAnnotation] = verify_with_llm(
         refined_results=sam2_results,
         confidence_threshold=llm_confidence_threshold,
         ollama_url=ollama_url,
         ollama_model=ollama_model,
+        skip=skip_llm_verify,
     )
     llm_total_rejected = sum(r.rejected_count for r in verified_results)
     llm_backend = verified_results[0].backend if verified_results else "passthrough"

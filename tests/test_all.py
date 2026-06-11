@@ -296,6 +296,18 @@ def test_sam2_refiner_fallback_missing_sam2():
     assert len(results[0].boxes) == 1
     assert results[0].boxes[0].class_name == "car"
 
+def test_sam2_refiner_skip_passes_through():
+    """refine_with_sam2(skip=True) passes YOLO boxes through unchanged (ablation)."""
+    from workers.annotator.yolo_annotator import AnnotationResult, BoundingBox
+    from workers.annotator.sam2_refiner import refine_with_sam2
+    box = BoundingBox(0, "motorcycle", 0.5, 0.5, 0.3, 0.2, 0.9)
+    ann = AnnotationResult(image_path="/nonexistent/img.jpg", boxes=[box])
+    results = refine_with_sam2([ann], skip=True)
+    assert len(results) == 1
+    assert results[0].fallback is True
+    assert results[0].refined_count == 0
+    assert results[0].boxes == [box]
+
 def test_bbox_from_mask():
     """_bbox_from_mask converts a binary mask to correct normalized bbox."""
     from workers.annotator.sam2_refiner import _bbox_from_mask, BoundingBox
@@ -340,6 +352,18 @@ def test_llm_verifier_confidence_filter():
                                ollama_url="http://localhost:1", ollama_model="llava")
     assert results[0].rejected_count >= 1   # low_conf rejected
     assert any(b.confidence >= 0.5 for b in results[0].boxes)
+
+def test_llm_verifier_skip_passes_through():
+    """verify_with_llm(skip=True) bypasses semantic verification (ablation)."""
+    from workers.annotator.yolo_annotator import BoundingBox
+    from workers.annotator.sam2_refiner import RefinedAnnotation
+    from workers.annotator.llm_verifier import verify_with_llm
+    box = BoundingBox(0, "motorcycle", 0.5, 0.5, 0.3, 0.2, confidence=0.8)
+    refined = RefinedAnnotation(image_path="/nonexistent.jpg", boxes=[box], fallback=True)
+    results = verify_with_llm([refined], confidence_threshold=0.5, skip=True)
+    assert results[0].backend == "passthrough"
+    assert results[0].boxes == [box]
+    assert results[0].rejected_count == 0
 
 def test_llm_verifier_empty_input():
     """verify_with_llm handles empty box list without error."""
@@ -783,9 +807,11 @@ if __name__ == "__main__":
     test("Datasets API: version_tag rejects ../",  test_version_tag_validation_rejects_path_traversal)
     test("SAM2: fallback on empty boxes",          test_sam2_refiner_fallback_no_boxes)
     test("SAM2: fallback when SAM2 not installed", test_sam2_refiner_fallback_missing_sam2)
+    test("SAM2: skip=True passes through",         test_sam2_refiner_skip_passes_through)
     test("SAM2: _bbox_from_mask geometry",         test_bbox_from_mask)
     test("LLM: passthrough when no backend",       test_llm_verifier_passthrough_no_backend)
     test("LLM: confidence filter pre-LLM",        test_llm_verifier_confidence_filter)
+    test("LLM: skip=True passes through",          test_llm_verifier_skip_passes_through)
     test("LLM: empty box list handled",            test_llm_verifier_empty_input)
     test("Pipeline: empty input → empty summary",  test_pipeline_empty_input)
     test("Pipeline: summary fields correct",       test_pipeline_summary_fields)

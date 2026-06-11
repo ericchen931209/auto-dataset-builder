@@ -80,6 +80,7 @@ def refine_with_sam2(
     checkpoint: str = "checkpoints/sam2_hiera_tiny.pt",
     config: str = "sam2_hiera_t.yaml",
     min_mask_area: int = 100,
+    skip: bool = False,
 ) -> list[RefinedAnnotation]:
     """
     For each AnnotationResult, use SAM2 to refine each bounding box.
@@ -94,10 +95,18 @@ def refine_with_sam2(
         checkpoint: Path to SAM2 model checkpoint (.pt file).
         config: SAM2 model config name (tiny / small / base_plus / large).
         min_mask_area: Masks smaller than this pixel count are discarded.
+        skip: If True, skip SAM2 entirely and pass YOLO boxes through
+              unchanged (for ablation studies).
 
     Returns:
         List of RefinedAnnotation, one per input AnnotationResult.
     """
+    if skip:
+        return [
+            RefinedAnnotation(image_path=ann.image_path, boxes=ann.boxes, fallback=True)
+            for ann in annotation_results
+        ]
+
     try:
         import cv2
         predictor, device = _try_load_sam2(checkpoint, config)
