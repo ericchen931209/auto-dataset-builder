@@ -256,6 +256,21 @@ def test_dataset_create_schema_requires_query():
     except Exception:
         pass  # expected
 
+def test_version_tag_validation_accepts_safe_tags():
+    from app.api.v1.datasets import _validate_version_tag
+    assert _validate_version_tag("v1.0") == "v1.0"
+    assert _validate_version_tag("v1.2-beta_3") == "v1.2-beta_3"
+
+def test_version_tag_validation_rejects_path_traversal():
+    from app.api.v1.datasets import _validate_version_tag
+    from fastapi import HTTPException
+    for bad in ["../../etc", "v1/../..", "..", ".hidden", "", "a/b"]:
+        try:
+            _validate_version_tag(bad)
+            assert False, f"Should have rejected {bad!r}"
+        except HTTPException as e:
+            assert e.status_code == 400
+
 # ─── Test: SAM2 Refiner (fallback path, no GPU needed) ───────────────────────
 
 def test_sam2_refiner_fallback_no_boxes():
@@ -764,6 +779,8 @@ if __name__ == "__main__":
     test("Extractor: fixed-rate from video",       test_frame_extractor_fixed_rate)
     test("Schema: DatasetCreate valid",            test_dataset_create_schema)
     test("Schema: DatasetCreate requires query",   test_dataset_create_schema_requires_query)
+    test("Datasets API: version_tag accepts safe", test_version_tag_validation_accepts_safe_tags)
+    test("Datasets API: version_tag rejects ../",  test_version_tag_validation_rejects_path_traversal)
     test("SAM2: fallback on empty boxes",          test_sam2_refiner_fallback_no_boxes)
     test("SAM2: fallback when SAM2 not installed", test_sam2_refiner_fallback_missing_sam2)
     test("SAM2: _bbox_from_mask geometry",         test_bbox_from_mask)

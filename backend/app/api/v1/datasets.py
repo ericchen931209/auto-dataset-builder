@@ -1,4 +1,5 @@
 import os
+import re
 
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from fastapi.responses import FileResponse
@@ -10,6 +11,17 @@ from app.db.models import Dataset, DatasetStatus, DatasetVersion
 from app.schemas.dataset import DatasetCreate, DatasetResponse, DatasetSummary
 
 router = APIRouter(prefix="/datasets", tags=["datasets"])
+
+# version_tag is interpolated directly into filesystem paths (exports/,
+# snapshots/) — restrict to a safe charset to prevent path traversal
+# (e.g. version_tag="../../etc").
+_VERSION_TAG_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+
+
+def _validate_version_tag(version_tag: str) -> str:
+    if ".." in version_tag or not _VERSION_TAG_RE.match(version_tag):
+        raise HTTPException(status_code=400, detail=f"Invalid version_tag: {version_tag!r}")
+    return version_tag
 
 
 @router.get("/", response_model=List[DatasetSummary])
@@ -81,7 +93,7 @@ def evaluate_dqs(dataset_id: int, db: Session = Depends(get_db)):
     # Persist to database
     dataset.dqs_score = score
     dataset.dqs_annotation_quality = features.annotation_quality
-    dataset.dqs_diversity = features.diversity
+    dataset.dqs_diversity = features.clip_diversity
     dataset.dqs_lighting = features.lighting_diversity
     dataset.dqs_pose = features.pose_diversity
     dataset.dqs_class_balance = features.class_balance
@@ -108,6 +120,8 @@ def export_dataset(
     Returns download URL.
     """
     from app.services.exporter import export_yolo, export_coco
+
+    _validate_version_tag(version_tag)
 
     dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
     if not dataset:
@@ -162,6 +176,8 @@ def download_dataset(
     db: Session = Depends(get_db),
 ):
     """Stream the exported zip file for download."""
+    _validate_version_tag(version_tag)
+
     dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
     if not dataset:
         raise HTTPException(status_code=404, detail="Dataset not found")
@@ -189,6 +205,8 @@ def create_version(
 ):
     """Create a versioned snapshot of the current dataset state."""
     from app.services.version_control import create_snapshot
+
+    _validate_version_tag(version_tag)
 
     dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
     if not dataset:
