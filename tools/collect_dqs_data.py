@@ -114,6 +114,42 @@ def _adjust_brightness(img: np.ndarray, factor: float) -> np.ndarray:
     return np.clip(img.astype(np.float32) * factor, 0, 255).astype(np.uint8)
 
 
+def _downscale_upscale(img: np.ndarray, scale: float) -> np.ndarray:
+    """Simulate a low-resolution capture: downscale then upscale back."""
+    h, w = img.shape[:2]
+    small_w, small_h = max(1, int(w * scale)), max(1, int(h * scale))
+    small = cv2.resize(img, (small_w, small_h), interpolation=cv2.INTER_LINEAR)
+    return cv2.resize(small, (w, h), interpolation=cv2.INTER_LINEAR)
+
+
+def _jpeg_compress(img: np.ndarray, quality: int) -> np.ndarray:
+    """Re-encode through JPEG at the given quality (1-100) to introduce compression artifacts."""
+    ok, enc = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, quality])
+    if not ok:
+        return img
+    decoded = cv2.imdecode(enc, cv2.IMREAD_COLOR)
+    return decoded if decoded is not None else img
+
+
+def _hue_shift(img: np.ndarray, shift_deg: int) -> np.ndarray:
+    """Shift hue by shift_deg degrees (OpenCV hue range is 0-179 == 0-358deg)."""
+    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV).astype(np.int16)
+    hsv[..., 0] = (hsv[..., 0] + shift_deg // 2) % 180
+    return cv2.cvtColor(hsv.astype(np.uint8), cv2.COLOR_HSV2BGR)
+
+
+def _cutout(img: np.ndarray, n_holes: int, hole_frac: float, rng: random.Random) -> np.ndarray:
+    """Zero out n_holes random rectangular regions (occlusion simulation)."""
+    out = img.copy()
+    h, w = out.shape[:2]
+    hh, hw = max(1, int(h * hole_frac)), max(1, int(w * hole_frac))
+    for _ in range(n_holes):
+        y = rng.randint(0, max(0, h - hh))
+        x = rng.randint(0, max(0, w - hw))
+        out[y:y + hh, x:x + hw] = 0
+    return out
+
+
 def _copy_labels_with_missing(src_lbls: list[str], out_lbl: str, missing_frac: float,
                                rng: random.Random) -> None:
     """Copy labels but blank out missing_frac of them (simulates annotation gaps)."""
@@ -405,6 +441,101 @@ def build_variants(
             transform_img=tfm,
         )
 
+    # 96–103. Resolution downscale (simulated low-res capture)
+    for i, scale in enumerate([0.10, 0.15, 0.20, 0.25, 0.30, 0.40, 0.50, 0.60]):
+        k = max(10, int(n * 0.7))
+        sel = rng.sample(list(range(n)), k)
+        s_val = scale
+        _make_variant(
+            f"v{i+96:02d}_lowres_{int(scale*100)}",
+            "resolution",
+            [img_paths[j] for j in sel],
+            [lbl_paths[j] for j in sel],
+            transform_img=lambda img, s=s_val: _downscale_upscale(img, s),
+        )
+
+    # 104–111. JPEG compression artifacts
+    for i, quality in enumerate([5, 10, 15, 20, 30, 40, 50, 70]):
+        k = max(10, int(n * 0.7))
+        sel = rng.sample(list(range(n)), k)
+        q_val = quality
+        _make_variant(
+            f"v{i+104:02d}_jpeg_q{quality}",
+            "compression",
+            [img_paths[j] for j in sel],
+            [lbl_paths[j] for j in sel],
+            transform_img=lambda img, q=q_val: _jpeg_compress(img, q),
+        )
+
+    # 112–119. Cutout / occlusion
+    for i, (n_holes, hole_frac) in enumerate([
+        (1, 0.10), (1, 0.20), (2, 0.10), (2, 0.20),
+        (3, 0.15), (4, 0.10), (4, 0.20), (6, 0.15),
+    ]):
+        k = max(10, int(n * 0.7))
+        sel = rng.sample(list(range(n)), k)
+        nh, hf = n_holes, hole_frac
+        cutout_rng = random.Random(1000 + i)
+        _make_variant(
+            f"v{i+112:02d}_cutout_{n_holes}x{int(hole_frac*100)}",
+            "occlusion",
+            [img_paths[j] for j in sel],
+            [lbl_paths[j] for j in sel],
+            transform_img=lambda img, h=nh, f=hf, r=cutout_rng: _cutout(img, h, f, r),
+        )
+
+    # 120–127. Hue / color shift
+    for i, shift_deg in enumerate([10, 20, 30, 45, 60, 90, 120, 150]):
+        k = max(10, int(n * 0.6))
+        sel = rng.sample(list(range(n)), k)
+        d_val = shift_deg
+        _make_variant(
+            f"v{i+120:02d}_hue_{shift_deg}",
+            "color",
+            [img_paths[j] for j in sel],
+            [lbl_paths[j] for j in sel],
+            transform_img=lambda img, d=d_val: _hue_shift(img, d),
+        )
+
+    # 128–135. New combined degradations (resolution / compression / occlusion / color)
+    new_combos = [
+        ("lowres_noise",   lambda img: _add_gaussian_noise(_downscale_upscale(img, 0.3), 15)),
+        ("lowres_dark",    lambda img: _adjust_brightness(_downscale_upscale(img, 0.25), 0.5)),
+        ("jpeg_blur",      lambda img: cv2.GaussianBlur(_jpeg_compress(img, 15), (7, 7), 0)),
+        ("jpeg_noise",     lambda img: _add_gaussian_noise(_jpeg_compress(img, 10), 20)),
+        ("cutout_dark",    lambda img: _cutout(_adjust_brightness(img, 0.5), 3, 0.15, random.Random(2001))),
+        ("cutout_noise",   lambda img: _add_gaussian_noise(_cutout(img, 3, 0.15, random.Random(2002)), 20)),
+        ("hue_blur",       lambda img: cv2.GaussianBlur(_hue_shift(img, 60), (7, 7), 0)),
+        ("hue_jpeg",       lambda img: _jpeg_compress(_hue_shift(img, 90), 20)),
+    ]
+    for i, (cname, tfm) in enumerate(new_combos):
+        k = max(10, int(n * 0.6))
+        sel = rng.sample(list(range(n)), k)
+        _make_variant(
+            f"v{i+128:02d}_{cname}",
+            "combined",
+            [img_paths[j] for j in sel],
+            [lbl_paths[j] for j in sel],
+            transform_img=tfm,
+        )
+
+    # 136–143. Finer label-noise gradations (fill in the AQ curve)
+    for i, shift in enumerate([0.01, 0.05, 0.07, 0.12, 0.15, 0.25, 0.30, 0.40]):
+        vid = f"v{i+136:02d}_lbl_noise2_{int(shift*100)}"
+        vdir = os.path.join(base_dir, vid)
+        out_img = os.path.join(vdir, "images", "train")
+        out_lbl = os.path.join(vdir, "labels", "train")
+        Path(out_img).mkdir(parents=True, exist_ok=True)
+        sel = rng.sample(list(range(n)), max(10, int(n * 0.7)))
+        s_imgs = [img_paths[j] for j in sel]
+        s_lbls = [lbl_paths[j] for j in sel]
+        for ip in s_imgs:
+            shutil.copy2(ip, out_img)
+        _copy_labels_with_noise(s_lbls, out_lbl, shift, rng)
+        variants.append({"id": vid, "type": "label_noise",
+                         "img_dir": out_img, "lbl_dir": out_lbl,
+                         "n_images": len(s_imgs)})
+
     return variants[:n_variants]
 
 
@@ -525,7 +656,7 @@ def run_quick_eval(variant: dict, coco128_yaml: str) -> tuple[float, float]:
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--variants",  type=int, default=30, help="Number of variants (max 30)")
+    parser.add_argument("--variants",  type=int, default=30, help="Number of variants (max 144)")
     parser.add_argument("--epochs",    type=int, default=DEFAULT_EPOCHS)
     parser.add_argument("--imgsize",   type=int, default=IMG_SIZE)
     parser.add_argument("--outfile",   type=str, default="dqs_training_data.csv")
