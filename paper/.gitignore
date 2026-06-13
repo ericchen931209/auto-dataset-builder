@@ -1,0 +1,9 @@
+*.aux
+*.log
+*.out
+*.fls
+*.fdb_latexmk
+*.blg
+*.synctex.gz
+arxiv_submission/
+arxiv_submission.tar.gz
